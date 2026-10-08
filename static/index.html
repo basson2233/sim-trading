@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模擬股票交易平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">📈 模擬股票交易平台 <span class="tag">虛擬資金・港股 / 美股</span></div>
+  <nav class="tabs">
+    <a href="#trade" data-tab="trade" class="tab active">交易</a>
+    <a href="#leaderboard" data-tab="leaderboard" class="tab">排行榜</a>
+  </nav>
+  <div class="right">
+    <span id="sourceBadge" class="badge">報價來源：…</span>
+    <span class="user">用戶：<b id="userName">-</b> <span id="userEmail" class="muted"></span></span>
+    <button id="changeEmailBtn" class="btn ghost small">更改電郵</button>
+    <button id="changePwBtn" class="btn ghost small">更改密碼</button>
+    <button id="logoutBtn" class="btn ghost small">登出</button>
+  </div>
+</header>
+
+<main>
+<section id="tab-trade">
+  <div class="cards" id="summaryCards"></div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="panel-head">
+        <form id="searchForm" class="search">
+          <input id="symbolInput" placeholder="輸入代號，例如 0700.HK、700、AAPL" autocomplete="off">
+          <button class="btn">查詢</button>
+        </form>
+        <div class="chips" id="quickChips"></div>
+      </div>
+      <div id="quoteHead" class="quote-head"></div>
+      <div class="ranges" id="ranges"></div>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+        <div id="chartTip" class="chart-tip hidden"></div>
+        <div id="chartMsg" class="chart-msg"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>落單</h3>
+      <form id="orderForm" class="order-form">
+        <div class="seg" id="sideSeg">
+          <button type="button" data-v="BUY" class="on buy">買入</button>
+          <button type="button" data-v="SELL" class="sell">賣出</button>
+        </div>
+        <div class="seg" id="typeSeg">
+          <button type="button" data-v="MARKET" class="on">市價單</button>
+          <button type="button" data-v="LIMIT">限價單</button>
+        </div>
+        <label>股票<input id="oSymbol" readonly></label>
+        <label>數量（股）
+          <div class="qty">
+            <button type="button" class="btn ghost" id="qtyMinus">−</button>
+            <input id="oQty" type="number" min="1" step="1" value="100">
+            <button type="button" class="btn ghost" id="qtyPlus">＋</button>
+          </div>
+          <small id="lotHint" class="muted"></small>
+        </label>
+        <label id="limitRow" class="hidden">限價<input id="oLimit" type="number" step="0.001" min="0"></label>
+        <div class="est" id="estimate"></div>
+        <button class="btn primary big" id="submitBtn">確認買入</button>
+        <div id="orderMsg" class="msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><h3>持倉</h3></div>
+    <div class="table-wrap"><table id="posTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title"><h3>未成交訂單</h3><small class="muted">限價單到價會自動成交（約每 10 秒檢查一次）</small></div>
+    <div class="table-wrap"><table id="openTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">
+      <div class="seg small" id="histSeg">
+        <button type="button" data-v="trades" class="on">成交記錄</button>
+        <button type="button" data-v="orders">訂單記錄</button>
+      </div>
+      <button id="resetBtn" class="btn danger small">重設帳戶</button>
+    </div>
+    <div class="table-wrap"><table id="histTable"></table></div>
+  </div>
+</section>
+
+<section id="tab-leaderboard" class="hidden">
+  <div class="panel">
+    <div class="panel-title"><h3>🏆 排行榜（按總回報率）</h3><button class="btn ghost small" id="lbRefresh">重新整理</button></div>
+    <p class="muted" id="lbNote"></p>
+    <div class="table-wrap"><table id="lbTable"></table></div>
+  </div>
+</section>
+</main>
+
+<div id="pwModal" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="pwTitle">更改密碼</h2>
+    <form id="pwForm" class="order-form">
+      <label id="pwCurRow">現有密碼<input id="pwCur" type="password" autocomplete="current-password"></label>
+      <label>新密碼<input id="pwNew" type="password" autocomplete="new-password" required minlength="8">
+        <small class="muted">最少 8 個字；更改後其他裝置會被登出</small></label>
+      <label>確認新密碼<input id="pwNew2" type="password" autocomplete="new-password" required minlength="8"></label>
+      <div class="msg" id="pwMsg"></div>
+      <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="pwCancel" style="flex:1">取消</button>
+      <button class="btn primary" style="flex:1">確認更改</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="emailModal" class="modal hidden">
+  <div class="modal-box">
+    <h2>更改電郵</h2>
+    <p class="muted">要輸入現有密碼。未有電郵嘅帳戶設定咗之後先可以用「忘記密碼」。</p>
+    <form id="emailForm" class="order-form">
+      <label>現有密碼<input id="emPw" type="password" autocomplete="current-password" required></label>
+      <label>新電郵<input id="emEmail" type="email" autocomplete="email" required maxlength="254"></label>
+      <div class="msg" id="emMsg"></div>
+      <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="emCancel" style="flex:1">取消</button>
+      <button class="btn primary" style="flex:1">確認更改</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

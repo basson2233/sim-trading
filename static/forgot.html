@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>忘記密碼・模擬股票交易平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-page">
+<div class="auth-box">
+  <div class="brand big-brand">🔑 忘記密碼</div>
+  <p class="muted">輸入註冊時用嘅電郵。如果有登記，我哋會寄出一個 30 分鐘內有效、只可以用一次嘅重設連結。</p>
+  <form id="forgotForm" class="order-form">
+    <label>電郵<input id="email" type="email" autocomplete="email" required maxlength="254"></label>
+    <button class="btn primary big">發送重設連結</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <div id="demo" class="demo-link hidden">
+    <b>未設定電郵伺服器，以下是本機演示用的重設連結</b>
+    <a id="demoLink" href="#"></a>
+  </div>
+  <p class="muted small-text" style="margin-top:14px"><a href="/login">返回登入</a></p>
+</div>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+$("#forgotForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.submitter; btn.disabled = true;
+  $("#msg").className = "msg"; $("#msg").textContent = "";
+  $("#demo").classList.add("hidden");
+  try {
+    const r = await fetch("/api/auth/forgot", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({email: $("#email").value.trim()})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "輸入有誤，請檢查");
+    $("#msg").className = "msg ok";
+    $("#msg").textContent = d.message;
+    if (d.reset_url) {
+      $("#demo").classList.remove("hidden");
+      $("#demoLink").href = d.reset_url;
+      $("#demoLink").textContent = d.reset_url;
+    }
+  } catch (err) { $("#msg").className = "msg err"; $("#msg").textContent = "❌ " + err.message; }
+  finally { btn.disabled = false; }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+data/
+*.db
+*.db-wal
+*.db-shm
+password-resets.log
+*.log
+screenshot*.png

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重設密碼・模擬股票交易平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-page">
+<div class="auth-box">
+  <div class="brand big-brand">🔒 重設密碼</div>
+  <p class="muted">設定一個新密碼（最少 8 個字）。成功之後，你其他裝置嘅登入會全部登出。</p>
+  <form id="resetForm" class="order-form">
+    <label>新密碼<input id="p1" type="password" autocomplete="new-password" required minlength="8"></label>
+    <label>確認新密碼<input id="p2" type="password" autocomplete="new-password" required minlength="8"></label>
+    <button class="btn primary big">重設密碼</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <p class="muted small-text" id="done" style="margin-top:14px"></p>
+  <p class="muted small-text"><a href="/login">返回登入</a> · <a href="/forgot">重新申請連結</a></p>
+</div>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const token = new URLSearchParams(location.search).get("token") || "";
+if (!token) { $("#msg").className = "msg err"; $("#msg").textContent = "❌ 缺少重設連結，請重新申請"; $("#resetForm").classList.add("hidden"); }
+$("#resetForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const m = $("#msg");
+  if ($("#p1").value !== $("#p2").value) { m.className = "msg err"; m.textContent = "❌ 兩次輸入嘅密碼唔一樣"; return; }
+  e.submitter.disabled = true;
+  try {
+    const r = await fetch("/api/auth/reset", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token, password: $("#p1").value, password_confirm: $("#p2").value})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "輸入有誤，請檢查");
+    $("#resetForm").classList.add("hidden");
+    m.className = "msg ok"; m.textContent = "✅ 密碼已重設，請用新密碼登入";
+    $("#done").innerHTML = '<a href="/login">去登入</a>';
+  } catch (err) { m.className = "msg err"; m.textContent = "❌ " + err.message; e.submitter.disabled = false; }
+});
+</script>
+</body>
+</html>

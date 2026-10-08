@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登入・模擬股票交易平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-page">
+<div class="auth-box">
+  <div class="brand big-brand">📈 模擬股票交易平台</div>
+  <p class="muted">用虛擬資金買賣港股同美股，同朋友鬥回報 🏆</p>
+  <div class="seg auth-tabs">
+    <a href="/login" id="tabLogin" class="on">登入</a>
+    <a href="/register" id="tabRegister">註冊</a>
+  </div>
+
+  <form id="loginForm" class="order-form" autocomplete="on">
+    <label>用戶名<input id="lUser" name="username" autocomplete="username" required maxlength="20"></label>
+    <label>密碼<input id="lPass" name="password" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary big">登入</button>
+    <a id="googleBtn" class="btn ghost big google-btn hidden" href="/auth/google/start">用 Google 登入</a>
+    <div class="msg" id="loginMsg"></div>
+    <p class="muted small-text"><a href="/forgot">忘記密碼？</a></p>
+  </form>
+
+  <form id="registerForm" class="order-form hidden" autocomplete="on">
+    <label>用戶名<input id="rUser" name="username" autocomplete="username" required maxlength="20">
+      <small class="muted">2-20 個字，可以用中英文、數字、_ 或 -</small></label>
+    <label>電郵<input id="rEmail" name="email" type="email" autocomplete="email" required maxlength="254">
+      <small class="muted">用嚟重設密碼，唔可以同其他人重複</small></label>
+    <label>密碼<input id="rPass" name="new-password" type="password" autocomplete="new-password" required minlength="8">
+      <small class="muted">最少 8 個字，唔可以同用戶名一樣</small></label>
+    <label>確認密碼<input id="rPass2" type="password" autocomplete="new-password" required minlength="8"></label>
+    <button class="btn primary big">註冊並開始交易</button>
+    <a class="btn ghost big google-btn hidden" href="/auth/google/start">用 Google 登入</a>
+    <div class="msg" id="registerMsg"></div>
+    <p class="muted small-text">新帳戶會獲發 HKD 1,000,000 同 USD 100,000 虛擬資金。</p>
+  </form>
+</div>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const isReg = location.pathname === "/register";
+$("#loginForm").classList.toggle("hidden", isReg);
+$("#registerForm").classList.toggle("hidden", !isReg);
+$("#tabLogin").classList.toggle("on", !isReg);
+$("#tabRegister").classList.toggle("on", isReg);
+document.title = (isReg ? "註冊" : "登入") + "・模擬股票交易平台";
+(isReg ? $("#rUser") : $("#lUser")).focus();
+
+async function post(url, body, msgEl, btn) {
+  msgEl.className = "msg"; msgEl.textContent = ""; btn.disabled = true;
+  try {
+    const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "輸入有誤，請檢查");
+    location.href = "/";
+  } catch (e) { msgEl.className = "msg err"; msgEl.textContent = "❌ " + e.message; }
+  finally { btn.disabled = false; }
+}
+$("#loginForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  post("/api/auth/login", {username: $("#lUser").value.trim(), password: $("#lPass").value}, $("#loginMsg"), e.submitter);
+});
+$("#registerForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const m = $("#registerMsg");
+  if ($("#rPass").value !== $("#rPass2").value) { m.className = "msg err"; m.textContent = "❌ 兩次輸入嘅密碼唔一樣"; return; }
+  post("/api/auth/register", {username: $("#rUser").value.trim(), email: $("#rEmail").value.trim(),
+    password: $("#rPass").value, password_confirm: $("#rPass2").value}, m, e.submitter);
+});
+fetch("/api/auth/providers").then((r) => r.json()).then((d) => {
+  if (d.google) document.querySelectorAll(".google-btn").forEach((el) => el.classList.remove("hidden"));
+}).finally(() => { document.body.dataset.authReady = "1"; });
+const qErr = new URLSearchParams(location.search).get("err");
+if (qErr) { $("#loginMsg").className = "msg err"; $("#loginMsg").textContent = "❌ " + qErr; }
+</script>
+</body>
+</html>
