@@ -137,6 +137,49 @@ curl -b jar.txt -X POST localhost:8000/api/me/orders -H 'Content-Type: applicati
 curl -b jar.txt localhost:8000/api/me/portfolio
 ```
 
+## Deploy（永久公開）
+
+程式已經預備好喺 **Render**（免費 Web Service）或者任何 Docker 主機長駐運行。
+
+### 環境變數（正式環境）
+
+| 變數 | 建議值 | 說明 |
+|---|---|---|
+| `PORT` | 由平台注入 | uvicorn 監聽埠 |
+| `COOKIE_SECURE` | `1` | HTTPS 下必須 |
+| `DEV_SHOW_RESET_LINK` | `0` | 唔好喺正式環境公開重設連結 |
+| `APP_DATA_DIR` | `/data` | SQLite 同 `password-resets.log` 寫入位置（掛 persistent disk） |
+| `APP_BASE_URL` | `https://你的網域` | 重設密碼連結同 Google redirect 用 |
+| `GOOGLE_*` / `SMTP_*` | （可選） | 見上面「帳戶安全」 |
+
+本機預設仍然用專案入面嘅 `data/`；設咗 `APP_DATA_DIR` 就改去嗰度。
+
+### Render（建議）
+
+1. 開 [https://dashboard.render.com](https://dashboard.render.com)，用 GitHub 登入（帳戶 `basson2233`）。
+2. **New → Blueprint**，揀 repo `basson2233/sim-trading`，套用根目錄嘅 `render.yaml`。
+3. 等第一次 deploy 完，到 Environment 把 `APP_BASE_URL` 設成 `https://<你的服務名>.onrender.com`，再 Manual Deploy 一次。
+4. Persistent disk 掛喺 `/data`（1 GB），帳戶同交易資料會保留。
+
+或者本機有 [Render CLI](https://render.com/docs/cli) 而且已 `render login`：
+
+```bash
+render blueprint launch
+```
+
+### Docker（本機 / 其他雲）
+
+```bash
+docker build -t sim-trading .
+docker run --rm -p 8000:8000 \
+  -e APP_BASE_URL=http://localhost:8000 \
+  -e COOKIE_SECURE=0 \
+  -v sim-trading-data:/data \
+  sim-trading
+```
+
+GitHub 只係存 code；真正跑 uvicorn 嘅係 Render / 你部機。
+
 ## 限制（v1）
 
 - 忘記密碼靠電郵連結，但未設定 SMTP 就唔會真係寄信（見上面）。冇雙重認證；管理員重設仍然可以直接改 DB。

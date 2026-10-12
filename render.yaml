@@ -1,0 +1,32 @@
+# Blueprint for a free Render Web Service.
+# Connect this repo in the Render dashboard (New → Blueprint) or:
+#   render blueprint launch
+#
+# After the first deploy, set APP_BASE_URL to https://YOUR-SERVICE.onrender.com
+# (Render → Environment) so password-reset / Google OAuth links use the public URL.
+# Optional: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SMTP_* for Google login / email.
+
+services:
+  - type: web
+    name: sim-trading
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /login
+    disk:
+      name: sim-trading-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: DEV_SHOW_RESET_LINK
+        value: "0"
+      - key: APP_DATA_DIR
+        value: /data
+      - key: PRICE_SOURCE
+        value: auto
+      # Set after you know the public hostname, e.g. https://sim-trading.onrender.com
+      - key: APP_BASE_URL
+        sync: false

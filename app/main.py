@@ -24,6 +24,15 @@ STATIC = ROOT / "static"
 COOKIE = "sim_session"
 
 
+def data_dir() -> Path:
+    """Writable data directory for SQLite and logs.
+    Prefer APP_DATA_DIR (Render/Fly disk mount, e.g. /data); else ./data under the project."""
+    raw = os.environ.get("APP_DATA_DIR") or os.environ.get("SIM_DATA_DIR")
+    path = Path(raw).expanduser() if raw else (ROOT / "data")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _smtp_from_env():
     host = os.environ.get("SMTP_HOST", "").strip()
     sender = os.environ.get("SMTP_FROM", "").strip()
@@ -36,7 +45,8 @@ def _smtp_from_env():
 
 def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=None,
                google=None, dev_show_reset=None, smtp=None, base_url=None, reset_log=None):
-    db_path = db_path or os.environ.get("SIM_DB", str(ROOT / "data" / "sim_trading.db"))
+    dd = data_dir()
+    db_path = db_path or os.environ.get("SIM_DB", str(dd / "sim_trading.db"))
     if db_path != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     feed = feed or make_feed(os.environ.get("PRICE_SOURCE", "auto"))
@@ -56,7 +66,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         dev_show_reset = os.environ.get("DEV_SHOW_RESET_LINK", "0") == "1"
     if smtp is None:
         smtp = _smtp_from_env()
-    reset_log = reset_log or (ROOT / "data" / "password-resets.log")
+    reset_log = reset_log or (dd / "password-resets.log")
 
     @asynccontextmanager
     async def lifespan(app):
