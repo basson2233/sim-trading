@@ -33,6 +33,7 @@ cd /workspace/sim-trading
 ## 功能
 
 - **帳戶**：用戶名 + 密碼 + 電郵註冊 / 登入（`/register`、`/login`），新帳戶自動獲發 HKD 500,000 + USD 64,000（按 USD/HKD ≈ 7.8 合計約等值港幣 100 萬）。可以登出、更改密碼、更改電郵、忘記密碼（`/forgot`）。設定咗 Google OAuth 之後可以用 Google 登入。詳見下面「帳戶安全」。
+- **代號自動完成**：輸入框邊打邊建議（例如 `07`→`0700.HK`、`AAP`→`AAPL`、中文名「騰訊」），內建約 130 隻港股藍籌／美股大型股；API：`GET /api/symbols/suggest?q=`。
 - **報價**：Yahoo Finance chart API（後端代取，報價 cache 15 秒，或有約 15 分鐘延遲）；連唔到時自動用 **模擬隨機漫步價格**，介面會清楚標示「模擬價格」。
 - **圖表**：揀股票後顯示價格走勢，可揀 1日 / 5日 / 1個月 / 6個月 / 1年 / 5年，滑鼠移上去睇價格。
 - **落單**：市價單、限價單；買入 / 賣出。
@@ -97,6 +98,7 @@ app/
   engine.py    交易引擎（用戶、現金、持倉、訂單、成交、排行榜），SQLite
   quotes.py    YahooFeed / SimFeed / AutoFeed 報價 + 歷史價格
   symbols.py   代號正規化（700 → 0700.HK）、港股每手股數表
+  universe.py  內建港美股清單 + 代號／名稱建議
 static/        login.html、forgot.html、reset.html、index.html / app.js / style.css（純 JS，冇 build step，圖表用 canvas 自己畫）
 tests/         pytest：交易引擎、帳戶安全、API
 run.sh         一條命令啟動
@@ -198,7 +200,7 @@ GitHub 只係存 code；真正跑 uvicorn 嘅係 Render / 你部機。
 
 - 電郵驗證信、比賽模式（指定時段、重設全部人）
 - 交易時段 + 收市後掛單、止蝕 / 止賺單、碎股、沽空
-- 自選股清單、搜尋股票名稱（自動完成）
+- 自選股清單
 - 資產走勢圖（每日快照）、更多指標（MA、成交量）
 - 可選手續費 / 印花稅、換匯功能
 
