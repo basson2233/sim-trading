@@ -29,9 +29,11 @@ def hkd(p):
 def test_everything_requires_auth(app):
     c = client(app)
     for path in ["/api/me/portfolio", "/api/me/orders", "/api/me/trades", "/api/leaderboard",
-                 "/api/quote?symbol=AAPL", "/api/history?symbol=AAPL&range=1M", "/api/auth/me"]:
+                 "/api/quote?symbol=AAPL", "/api/history?symbol=AAPL&range=1M", "/api/auth/me",
+                 "/api/fighter/stats", "/api/fighter/ai", "/api/fighter/history"]:
         assert c.get(path).status_code == 401, path
-    for path in ["/api/me/orders", "/api/me/reset", "/api/me/orders/1/cancel", "/api/auth/change-password"]:
+    for path in ["/api/me/orders", "/api/me/reset", "/api/me/orders/1/cancel", "/api/auth/change-password",
+                 "/api/fighter/match", "/api/fighter/result"]:
         assert c.post(path, json={}).status_code in (401, 422), path
     assert c.post("/api/me/orders", json={"symbol": "AAPL", "side": "BUY", "type": "MARKET", "qty": 1}).status_code == 401
     assert c.post("/api/me/reset").status_code == 401

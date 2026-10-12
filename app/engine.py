@@ -127,6 +127,19 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS ix_orders_user ON orders(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_trades_user ON trades(user_id);
+CREATE TABLE IF NOT EXISTS fighter_matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode TEXT NOT NULL,
+    player_username TEXT NOT NULL,
+    opponent_username TEXT NOT NULL,
+    winner TEXT NOT NULL,
+    player_kos INTEGER NOT NULL DEFAULT 0,
+    opponent_kos INTEGER NOT NULL DEFAULT 0,
+    player_atk REAL, player_def REAL, player_spd REAL,
+    opponent_atk REAL, opponent_def REAL, opponent_spd REAL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_fighter_matches_player ON fighter_matches(player_username, created_at);
 """
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{2,20}$")
@@ -562,3 +575,31 @@ class Engine:
         for i, r in enumerate(rows, 1):
             r["rank"] = i
         return {"base_currency": BASE_CURRENCY, "fx": {"USDHKD": fx}, "rows": rows, "as_of": _iso(_now())}
+
+    def record_fighter_match(self, mode, player_username, opponent_username, winner,
+                             player_kos, opponent_kos, player_stats, opponent_stats):
+        """Store a 理財戰士 match result for later leaderboard / history."""
+        now = _now()
+        ps, os_ = player_stats or {}, opponent_stats or {}
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO fighter_matches(mode,player_username,opponent_username,winner,"
+                "player_kos,opponent_kos,player_atk,player_def,player_spd,"
+                "opponent_atk,opponent_def,opponent_spd,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (mode, player_username, opponent_username, winner,
+                 int(player_kos), int(opponent_kos),
+                 ps.get("atk"), ps.get("def"), ps.get("spd"),
+                 os_.get("atk"), os_.get("def"), os_.get("spd"), now))
+            return {"id": cur.lastrowid, "created_at": now, "created_at_iso": _iso(now)}
+
+    def recent_fighter_matches(self, username, limit=20):
+        rows = self.db.execute(
+            "SELECT * FROM fighter_matches WHERE player_username=? OR opponent_username=? "
+            "ORDER BY id DESC LIMIT ?", (username, username, limit)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["created_at_iso"] = _iso(d["created_at"])
+            out.append(d)
+        return out

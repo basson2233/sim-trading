@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>理財戰士 — 模擬股票交易平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/fighter.css">
+</head>
+<body class="fighter-page">
+<header class="topbar">
+  <div class="brand">⚔️ 理財戰士 <span class="tag">大亂鬥・擊飛出界</span></div>
+  <nav class="tabs">
+    <a href="/" class="tab">交易</a>
+    <a href="/#leaderboard" class="tab">排行榜</a>
+    <a href="/fighter" class="tab active">理財戰士</a>
+  </nav>
+  <div class="right">
+    <span class="user">用戶：<b id="userName">-</b></span>
+    <button id="logoutBtn" class="btn ghost small">登出</button>
+  </div>
+</header>
+
+<main class="fighter-main">
+  <p class="tip-banner" id="tipBanner">你嘅持倉市值決定戰士屬性——邊類股票投得多，對應屬性就愈高</p>
+
+  <div id="lobby" class="fighter-lobby">
+    <div class="grid2 fighter-grid">
+      <div class="panel">
+        <h3>你嘅戰士屬性</h3>
+        <p class="muted small-text">由持倉<strong>市值</strong>加權：攻擊＝成長／科技股，防禦＝銀行／公用／必選，速度＝高流動／ETF</p>
+        <div id="myStats" class="stat-block"></div>
+        <div id="myBreakdown" class="breakdown"></div>
+      </div>
+      <div class="panel">
+        <h3>對戰模式</h3>
+        <div class="mode-card">
+          <h4>🤖 對戰 AI 練習</h4>
+          <p class="muted">隨時練習，贏兩局先勝（先至 2 KO）</p>
+          <label class="diff-label">難度
+            <select id="aiDiff">
+              <option value="easy">簡單</option>
+              <option value="normal" selected>普通</option>
+              <option value="hard">困難</option>
+            </select>
+          </label>
+          <button id="btnAI" class="btn primary big">開始對戰 AI</button>
+        </div>
+        <div class="mode-card">
+          <h4>👥 每週同學賽</h4>
+          <p class="muted">建議每週固定時間同同學對戰一次。輸入對方用戶名，用雙方當下持倉屬性開打。</p>
+          <label>同學用戶名<input id="oppName" placeholder="例如 classmate01" autocomplete="off"></label>
+          <button id="btnClassmate" class="btn big">挑戰同學</button>
+          <div id="matchMsg" class="msg"></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h3>近期對戰</h3></div>
+      <div class="table-wrap"><table id="histTable"><thead><tr><th class="l">時間</th><th>模式</th><th class="l">對手</th><th>結果</th><th>比分</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <div id="arena" class="fighter-arena hidden">
+    <div class="arena-hud">
+      <div class="hud-side" id="hudP1">
+        <div class="hud-name" id="p1Name">你</div>
+        <div class="hud-pct" id="p1Pct">0%</div>
+        <div class="hud-stocks" id="p1Stocks">●●</div>
+        <div class="hud-mini" id="p1Mini"></div>
+      </div>
+      <div class="hud-center">
+        <div id="roundMsg" class="round-msg">準備</div>
+        <button id="btnBack" class="btn ghost small">返回大廳</button>
+      </div>
+      <div class="hud-side right" id="hudP2">
+        <div class="hud-name" id="p2Name">對手</div>
+        <div class="hud-pct" id="p2Pct">0%</div>
+        <div class="hud-stocks" id="p2Stocks">●●</div>
+        <div class="hud-mini" id="p2Mini"></div>
+      </div>
+    </div>
+    <canvas id="game" width="960" height="540"></canvas>
+    <div class="controls-help">
+      <span>← → 移動</span>
+      <span>↑ / W 跳躍（可二段跳）</span>
+      <span>Z / 空白 / J 攻擊</span>
+      <span>↓+攻擊 下砸</span>
+      <span>目標：擊飛出界（冇血條，只有 %）</span>
+    </div>
+    <div id="resultOverlay" class="result-overlay hidden">
+      <div class="result-box">
+        <h2 id="resultTitle">勝利！</h2>
+        <p id="resultDetail"></p>
+        <div class="result-actions">
+          <button id="btnRematch" class="btn primary">再嚟一場</button>
+          <button id="btnToLobby" class="btn ghost">返回大廳</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/fighter.js"></script>
+</body>
+</html>

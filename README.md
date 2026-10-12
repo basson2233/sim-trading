@@ -45,7 +45,22 @@ cd /workspace/sim-trading
 - **記錄**：成交記錄（含已實現盈虧）、訂單記錄（含狀態）。
 - **排行榜**：按總回報率排名，顯示總資產（折合港元）、總盈虧、持倉數、成交次數。
 - **重設帳戶**：清除持倉 / 訂單 / 記錄，資金還原。
+- **理財戰士**：大亂鬥風格橫版格鬥（冇血條，擊飛出界）。攻擊／防禦／移動速度由持倉**市值**加權換算（成長／科技→攻擊、銀行／公用／必選→防禦、高流動／ETF→速度）。可對戰 AI 練習，或輸入同學用戶名開 1v1。入口：`/fighter`。
 - **持久化**：SQLite。
+
+## 理財戰士（Finance Fighter）
+
+大亂鬥風格：冇 HP，傷害係 %，目標係把對手擊飛出舞台邊界。
+
+**屬性規則（持倉市值加權）**：每隻持倉按市值佔總資產比重，加到該股主屬性（攻擊／防禦／速度）。邊類股票投嘅市值愈多，對應屬性愈高。現金比例高會令屬性接近基礎值。
+
+| 屬性 | 代表股票類型 | 例子 |
+|---|---|---|
+| 攻擊 ATK | 成長／科技／高波動 | 0700.HK 騰訊、NVDA、TSLA、9988.HK |
+| 防禦 DEF | 銀行／公用／電訊／必選／REIT | 0005.HK 匯豐、0002.HK 中電、JNJ、PG |
+| 速度 SPD | 高流動藍籌／ETF | 0388.HK 港交所、SPY、QQQ、MSFT、2800.HK |
+
+**操作**：←→ 移動，↑／W 跳躍（可二段跳），Z／空白／J 攻擊，↓+攻擊 下砸。先至 2 KO 獲勝。
 
 ## 帳戶安全
 
@@ -99,7 +114,8 @@ app/
   quotes.py    YahooFeed / SimFeed / AutoFeed 報價 + 歷史價格
   symbols.py   代號正規化（700 → 0700.HK）、港股每手股數表
   universe.py  內建港美股清單 + 代號／名稱建議
-static/        login.html、forgot.html、reset.html、index.html / app.js / style.css（純 JS，冇 build step，圖表用 canvas 自己畫）
+  fighter.py   理財戰士：股票親和力 + 持倉市值→ATK/DEF/SPD
+static/        login.html、forgot.html、reset.html、index.html / app.js / style.css、fighter.html / fighter.js / fighter.css
 tests/         pytest：交易引擎、帳戶安全、API
 run.sh         一條命令啟動
 ```
@@ -128,6 +144,12 @@ run.sh         一條命令啟動
 | GET | `/api/me/trades` | 成交記錄 🔒 |
 | POST | `/api/me/reset` | 重設帳戶 🔒 |
 | GET | `/api/leaderboard` | 排行榜 🔒 |
+| GET | `/api/fighter/stats` | 自己嘅戰士屬性（由持倉市值計）🔒 |
+| GET | `/api/fighter/ai?difficulty=normal&mirror=1` | AI 練習對手屬性 🔒 |
+| POST | `/api/fighter/match` `{opponent_username}` | 同學賽：雙方屬性快照 🔒 |
+| POST | `/api/fighter/result` | 記錄對戰結果 🔒 |
+| GET | `/api/fighter/history` | 近期對戰 🔒 |
+| GET | `/fighter` | 理財戰士遊戲頁（要登入） |
 
 🔒 = 要登入（冇有效 session 回 401）。
 

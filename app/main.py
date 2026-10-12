@@ -18,6 +18,7 @@ from .engine import Engine, TradingError
 from .quotes import RANGES, UnknownSymbol, make_feed
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 from .universe import suggest_symbols
+from .fighter import ai_stats, compute_fighter_stats
 
 log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
@@ -284,6 +285,76 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     def leaderboard(user=Depends(current_user)):
         return engine.leaderboard()
 
+
+    # ------------------------------------------------------------- 理財戰士 (Finance Fighter)
+    class FighterMatchIn(BaseModel):
+        opponent_username: str
+
+    class FighterResultIn(BaseModel):
+        mode: str  # ai | classmate
+        opponent_username: str
+        winner: str  # player | opponent | draw
+        player_kos: int = 0
+        opponent_kos: int = 0
+        player_stats: Optional[dict] = None
+        opponent_stats: Optional[dict] = None
+        difficulty: Optional[str] = None
+
+    @app.get("/api/fighter/stats")
+    def fighter_stats(user=Depends(current_user)):
+        """Own fighter ATK/DEF/SPD from current holdings market value."""
+        pf = guard(engine.portfolio, user["username"])
+        return compute_fighter_stats(pf)
+
+    @app.get("/api/fighter/ai")
+    def fighter_ai(difficulty: str = Query("normal"), mirror: int = Query(1),
+                   user=Depends(current_user)):
+        """Practice AI stats. mirror=1 uses a scaled copy of the player's stats."""
+        pf = guard(engine.portfolio, user["username"])
+        me = compute_fighter_stats(pf)
+        return ai_stats(difficulty, mirror=me if mirror else None)
+
+    @app.post("/api/fighter/match")
+    def fighter_match(body: FighterMatchIn, user=Depends(current_user)):
+        """Snapshot both players' live portfolio-derived stats for a classmate 1v1."""
+        opp = (body.opponent_username or "").strip()
+        if not opp:
+            raise HTTPException(400, "請輸入同學用戶名")
+        if opp.lower() == user["username"].lower():
+            raise HTTPException(400, "唔可以同自己對戰")
+        try:
+            pf_me = engine.portfolio(user["username"])
+            pf_opp = engine.portfolio(opp)
+        except TradingError as e:
+            raise HTTPException(400, str(e))
+        return {
+            "player": compute_fighter_stats(pf_me),
+            "opponent": compute_fighter_stats(pf_opp),
+            "mode": "classmate",
+        }
+
+    @app.post("/api/fighter/result")
+    def fighter_result(body: FighterResultIn, user=Depends(current_user)):
+        """Record a finished match (optional history)."""
+        mode = (body.mode or "").lower()
+        if mode not in ("ai", "classmate"):
+            raise HTTPException(400, "mode 必須係 ai 或 classmate")
+        winner = (body.winner or "").lower()
+        if winner not in ("player", "opponent", "draw"):
+            raise HTTPException(400, "winner 必須係 player / opponent / draw")
+        opp = (body.opponent_username or "").strip() or ("AI" if mode == "ai" else "")
+        if not opp:
+            raise HTTPException(400, "缺少對手名稱")
+        rec = engine.record_fighter_match(
+            mode, user["username"], opp, winner,
+            body.player_kos, body.opponent_kos,
+            body.player_stats, body.opponent_stats)
+        return {"ok": True, **rec}
+
+    @app.get("/api/fighter/history")
+    def fighter_history(user=Depends(current_user)):
+        return {"rows": engine.recent_fighter_matches(user["username"])}
+
     # ------------------------------------------------------------- pages
     def logged_in(request):
         return auth.session_user(request.cookies.get(COOKIE)) is not None
@@ -294,6 +365,12 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/fighter")
+    def fighter_page(request: Request):
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        return FileResponse(STATIC / "fighter.html", headers={"Cache-Control": "no-store"})
 
     @app.get("/login")
     @app.get("/register")
