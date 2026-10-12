@@ -110,12 +110,14 @@
     $("#p1Mini").textContent = `攻${ctx.player.atk} 防${ctx.player.def} 速${ctx.player.spd}`;
     $("#p2Mini").textContent = `攻${ctx.opponent.atk} 防${ctx.opponent.def} 速${ctx.opponent.spd}`;
     Game.start(ctx);
+    Game.refreshVirtPad();
   }
 
   function showLobby() {
     Game.stop();
     $("#arena").classList.add("hidden");
     $("#lobby").classList.remove("hidden");
+    Game.refreshVirtPad();
     loadLobby().catch((e) => toast(e.message));
   }
 
@@ -287,7 +289,10 @@
       running = true;
       keys = {};
       aiState = { cool: 0, jumpCool: 0 };
+      const pad = $("#virtPad");
+      if (pad) pad.querySelectorAll(".virt-btn.pressed").forEach((b) => b.classList.remove("pressed"));
       resetRoundPositions();
+      refreshVirtPad();
       loop();
     }
 
@@ -295,6 +300,7 @@
       running = false;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      keys = {};
     }
 
     function onKey(e, down) {
@@ -311,6 +317,96 @@
 
     window.addEventListener("keydown", (e) => onKey(e, true));
     window.addEventListener("keyup", (e) => onKey(e, false));
+
+    function wantsTouchPad() {
+      try {
+        return (
+          window.matchMedia("(pointer: coarse)").matches ||
+          window.matchMedia("(max-width: 900px)").matches ||
+          ("ontouchstart" in window && navigator.maxTouchPoints > 0)
+        );
+      } catch (_) {
+        return "ontouchstart" in window;
+      }
+    }
+
+    function refreshVirtPad() {
+      const pad = $("#virtPad");
+      if (!pad) return;
+      const inArena = !$("#arena").classList.contains("hidden");
+      const show = inArena && wantsTouchPad();
+      pad.classList.toggle("visible", show);
+      document.body.classList.toggle("fighter-touch-playing", show);
+    }
+
+    function setHeldKey(code, down) {
+      keys[code] = !!down;
+    }
+
+    function bindVirtPad() {
+      const pad = $("#virtPad");
+      if (!pad || pad._bound) return;
+      pad._bound = true;
+
+      const releaseAll = () => {
+        for (const btn of pad.querySelectorAll(".virt-btn")) {
+          btn.classList.remove("pressed");
+          const k = btn.dataset.key;
+          if (k) setHeldKey(k, false);
+        }
+      };
+
+      const onDown = (btn, e) => {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        btn.classList.add("pressed");
+        const key = btn.dataset.key;
+        const action = btn.dataset.action;
+        if (key) setHeldKey(key, true);
+        if (!running || !p1) return;
+        if (action === "jump") tryJump(p1);
+        if (action === "attack") {
+          tryAttack(p1, !!(keys["ArrowDown"] || keys["s"] || keys["S"]));
+        }
+        if (action === "smash") {
+          tryAttack(p1, true);
+        }
+      };
+
+      const onUp = (btn, e) => {
+        if (e && e.cancelable) e.preventDefault();
+        btn.classList.remove("pressed");
+        const key = btn.dataset.key;
+        if (key) setHeldKey(key, false);
+      };
+
+      for (const btn of pad.querySelectorAll(".virt-btn")) {
+        btn.addEventListener(
+          "pointerdown",
+          (e) => {
+            try {
+              btn.setPointerCapture(e.pointerId);
+            } catch (_) {}
+            onDown(btn, e);
+          },
+          { passive: false }
+        );
+        btn.addEventListener("pointerup", (e) => onUp(btn, e), { passive: false });
+        btn.addEventListener("pointercancel", (e) => onUp(btn, e), { passive: false });
+        btn.addEventListener("lostpointercapture", () => onUp(btn, null), { passive: true });
+        btn.addEventListener("contextmenu", (e) => e.preventDefault());
+      }
+
+      window.addEventListener("blur", releaseAll);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) releaseAll();
+      });
+      window.addEventListener("resize", refreshVirtPad);
+      window.addEventListener("orientationchange", refreshVirtPad);
+    }
+
+    bindVirtPad();
+    refreshVirtPad();
 
     function tryJump(f) {
       if (f.hitstun > 0) return;
@@ -655,7 +751,7 @@
       draw();
     }
 
-    return { start, stop };
+    return { start, stop, refreshVirtPad };
   })();
 
   loadLobby().catch((e) => toast(e.message));

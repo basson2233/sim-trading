@@ -35,3 +35,78 @@
 .result-box h2{margin:0 0 8px;font-size:28px}
 .result-actions{display:flex;gap:10px;justify-content:center;margin-top:16px}
 .small-text{font-size:13px}
+
+/* Mobile virtual controls — shown on touch / narrow when arena is active */
+.virt-pad{
+  display:none;
+  position:fixed;
+  left:0;right:0;bottom:0;
+  z-index:20;
+  pointer-events:none;
+  padding:8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:16px;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.virt-pad.visible{display:flex}
+.virt-cluster{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  pointer-events:auto;
+  max-width:48%;
+}
+.virt-cluster.left{justify-content:flex-start}
+.virt-cluster.right{justify-content:flex-end}
+.virt-btn{
+  width:64px;height:64px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,.28);
+  background:rgba(23,29,37,.78);
+  color:#f3f4f6;
+  font-size:15px;font-weight:700;
+  box-shadow:0 4px 14px rgba(0,0,0,.35);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+  touch-action:none;
+  -webkit-tap-highlight-color:transparent;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  line-height:1;
+}
+.virt-btn.move{width:58px;height:58px;font-size:18px}
+.virt-btn.move.down{width:52px;height:52px;font-size:14px;opacity:.92}
+.virt-btn.action.jump{background:rgba(59,130,246,.72);border-color:rgba(147,197,253,.55)}
+.virt-btn.action.attack{background:rgba(234,57,67,.72);border-color:rgba(252,165,165,.55);width:72px;height:72px}
+.virt-btn.action.smash{background:rgba(245,158,11,.72);border-color:rgba(253,230,138,.55);width:60px;height:60px;font-size:13px}
+.virt-btn:active,.virt-btn.pressed{
+  transform:scale(.94);
+  filter:brightness(1.15);
+}
+body.fighter-touch-playing{
+  overscroll-behavior:none;
+  touch-action:none;
+}
+body.fighter-touch-playing .fighter-arena #game{touch-action:none}
+body.fighter-touch-playing .kb-help{display:none}
+body.fighter-touch-playing .fighter-main{
+  padding-bottom:120px;
+}
+@media (max-width:700px){
+  .virt-btn{width:56px;height:56px;font-size:13px}
+  .virt-btn.move{width:52px;height:52px}
+  .virt-btn.action.attack{width:64px;height:64px}
+  .arena-hud{gap:6px}
+  .hud-pct{font-size:24px}
+  .fighter-page .topbar .tabs{display:none}
+}
+@media (orientation:landscape) and (max-height:500px){
+  .virt-pad{padding:4px 16px calc(4px + env(safe-area-inset-bottom, 0px))}
+  .virt-btn{width:48px;height:48px;font-size:12px}
+  .virt-btn.action.attack{width:56px;height:56px}
+  body.fighter-touch-playing .fighter-main{padding-bottom:72px}
+  .arena-hud{margin-bottom:2px}
+}
