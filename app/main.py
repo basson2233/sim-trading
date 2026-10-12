@@ -58,7 +58,16 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     interval = pending_interval if pending_interval is not None else float(os.environ.get("PENDING_INTERVAL", 10))
     if cookie_secure is None:
         cookie_secure = os.environ.get("COOKIE_SECURE", "0") == "1"
-    base_url = (base_url or os.environ.get("APP_BASE_URL") or "http://localhost:8000").rstrip("/")
+    # Prefer explicit APP_BASE_URL; else Railway/public host; else localhost.
+    if base_url is None:
+        base_url = os.environ.get("APP_BASE_URL", "").strip()
+    if not base_url:
+        railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+        if railway_domain:
+            base_url = f"https://{railway_domain}"
+    if not base_url:
+        base_url = "http://localhost:8000"
+    base_url = base_url.rstrip("/")
     if google is None:
         google = GoogleOAuth(os.environ.get("GOOGLE_CLIENT_ID", ""), os.environ.get("GOOGLE_CLIENT_SECRET", ""),
                              base_url)

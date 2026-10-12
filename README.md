@@ -199,3 +199,19 @@ GitHub 只係存 code；真正跑 uvicorn 嘅係 Render / 你部機。
 - 自選股清單、搜尋股票名稱（自動完成）
 - 資產走勢圖（每日快照）、更多指標（MA、成交量）
 - 可選手續費 / 印花稅、換匯功能
+
+## 部署到 Railway（免費、唔使信用卡）
+
+1. 喺 [railway.com](https://railway.com) 用 GitHub 註冊（Free Trial → Free plan，每月 $1 額度，唔使信用卡）。
+2. New Project → Deploy from GitHub → 揀 `basson2233/sim-trading`。
+3. Railway 會用 repo 根目錄嘅 `Dockerfile` 起 image。
+4. Variables 建議：
+   - `COOKIE_SECURE=1`
+   - `APP_DATA_DIR=/data`
+   - `PRICE_SOURCE=auto`
+   - `DEV_SHOW_RESET_LINK=0`
+   - `APP_BASE_URL=https://你的服務.up.railway.app`（第一次有域名之後再設；未設時會用 `RAILWAY_PUBLIC_DOMAIN`）
+5. Settings → Volumes → 加一個 volume，mount path `/data`（Free 計劃 0.5 GB），等 SQLite 唔會因重啟清晒。
+6. Settings → Networking → Generate Domain，就會有 `https://….up.railway.app/login`。
+
+`railway.toml` 已經設定 healthcheck `/login`。CLI：`railway login` → `railway init` / `railway link` → `railway up` → `railway domain` → `railway volume add`。

@@ -1,0 +1,14 @@
+# Railway Free plan — no credit card. Detects Dockerfile automatically;
+# this file pins healthcheck and restart behaviour.
+# After first deploy: attach a volume mounted at /data (0.5 GB on Free),
+# set APP_BASE_URL to https://YOUR-SERVICE.up.railway.app, then redeploy.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/login"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
