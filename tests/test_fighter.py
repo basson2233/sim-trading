@@ -133,3 +133,41 @@ def test_fighter_match_and_result(app, feed):
     hist = c.get("/api/fighter/history").json()
     assert len(hist["rows"]) >= 1
     assert hist["rows"][0]["winner"] == "player"
+
+
+def test_fighter_page_has_three_maps(app):
+    c = client(app)
+    register(c, "alice")
+    page = c.get("/fighter")
+    assert page.status_code == 200
+    text = page.text
+    assert "選擇地圖" in text
+    assert 'data-map="hkex"' in text
+    assert 'data-map="wallstreet"' in text
+    assert 'data-map="vault"' in text
+    assert "港交所擂台" in text
+    assert "華爾街夜景" in text
+    assert "銀行金庫" in text
+    assert 'id="mapPicker"' in text
+    assert 'id="mapLabel"' in text
+
+
+def test_fighter_js_maps_have_height_and_movers():
+    """Static check: each map has multi-height platforms + a moving L2 platform."""
+    from pathlib import Path
+
+    js = Path(__file__).resolve().parents[1] / "static" / "fighter.js"
+    src = js.read_text(encoding="utf-8")
+    assert "港交所擂台" in src and "華爾街夜景" in src and "銀行金庫" in src
+    assert 'id: "hkex"' in src
+    assert 'id: "wallstreet"' in src
+    assert 'id: "vault"' in src
+    assert 'kind: "moving"' in src
+    assert 'axis: "x"' in src
+    assert 'axis: "y"' in src
+    # carry rider on moving platform
+    assert "updateMovingPlatforms" in src
+    assert "onPlat" in src
+    assert "mapPicker" in Path(__file__).resolve().parents[1].joinpath("static/fighter.html").read_text(
+        encoding="utf-8"
+    )

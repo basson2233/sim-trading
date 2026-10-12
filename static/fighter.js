@@ -53,8 +53,117 @@
       .join("")}</tbody></table>`;
   }
 
+  // -------------------- Maps (高低差 + 移動第二層) --------------------
+  const MAPS = {
+    hkex: {
+      id: "hkex",
+      name: "港交所擂台",
+      ticker: "0700  ▲   0388  ▲   0005  ▼   HSI  ■",
+      bg: { top: "#0b1a33", bottom: "#132844", accent: "#16c784", stars: true, theme: "hkex" },
+      blast: { left: -80, right: 1040, top: -120, bottom: 640 },
+      spawn: { p1x: 260, p2x: 660, groundY: 430 },
+      platforms: [
+        { id: "main", x: 100, y: 430, w: 760, h: 28, kind: "main", color: "#334155", accent: "#16c784" },
+        { id: "left", x: 160, y: 300, w: 150, h: 16, kind: "static", color: "#475569", accent: "#38bdf8" },
+        { id: "right", x: 650, y: 300, w: 150, h: 16, kind: "static", color: "#475569", accent: "#38bdf8" },
+        {
+          id: "mover",
+          x: 380,
+          y: 220,
+          w: 180,
+          h: 16,
+          kind: "moving",
+          axis: "x",
+          min: 220,
+          max: 560,
+          speed: 1.35,
+          color: "#64748b",
+          accent: "#fbbf24",
+        },
+      ],
+    },
+    wallstreet: {
+      id: "wallstreet",
+      name: "華爾街夜景",
+      ticker: "AAPL  ▲   JPM  ■   SPY  ▲   DJI  ▼",
+      bg: { top: "#050814", bottom: "#1a1040", accent: "#a78bfa", stars: true, theme: "wallstreet" },
+      blast: { left: -100, right: 1060, top: -140, bottom: 660 },
+      spawn: { p1x: 220, p2x: 700, groundY: 450 },
+      platforms: [
+        { id: "mainL", x: 40, y: 450, w: 320, h: 26, kind: "main", color: "#1e293b", accent: "#f59e0b" },
+        { id: "mainR", x: 600, y: 450, w: 320, h: 26, kind: "main", color: "#1e293b", accent: "#f59e0b" },
+        { id: "ledgeL", x: 80, y: 320, w: 140, h: 14, kind: "static", color: "#334155", accent: "#c4b5fd" },
+        { id: "ledgeR", x: 740, y: 320, w: 140, h: 14, kind: "static", color: "#334155", accent: "#c4b5fd" },
+        { id: "midHigh", x: 380, y: 260, w: 200, h: 14, kind: "static", color: "#312e81", accent: "#818cf8" },
+        {
+          id: "mover",
+          x: 300,
+          y: 360,
+          w: 200,
+          h: 16,
+          kind: "moving",
+          axis: "x",
+          min: 200,
+          max: 560,
+          speed: 1.6,
+          color: "#4c1d95",
+          accent: "#a78bfa",
+        },
+      ],
+    },
+    vault: {
+      id: "vault",
+      name: "銀行金庫",
+      ticker: "VAULT  ■   GOLD  ▲   CASH  ■   SAFE  ▼",
+      bg: { top: "#1c1917", bottom: "#44403c", accent: "#d97706", stars: false, theme: "vault" },
+      blast: { left: -60, right: 1020, top: -100, bottom: 620 },
+      spawn: { p1x: 300, p2x: 620, groundY: 440 },
+      platforms: [
+        { id: "main", x: 220, y: 440, w: 520, h: 30, kind: "main", color: "#44403c", accent: "#d97706" },
+        { id: "lowL", x: 80, y: 360, w: 130, h: 16, kind: "static", color: "#57534e", accent: "#fbbf24" },
+        { id: "lowR", x: 750, y: 360, w: 130, h: 16, kind: "static", color: "#57534e", accent: "#fbbf24" },
+        { id: "high", x: 380, y: 180, w: 200, h: 14, kind: "static", color: "#78716c", accent: "#fcd34d" },
+        {
+          id: "mover",
+          x: 390,
+          y: 280,
+          w: 180,
+          h: 16,
+          kind: "moving",
+          axis: "y",
+          min: 200,
+          max: 340,
+          speed: 1.1,
+          color: "#a16207",
+          accent: "#fde68a",
+        },
+      ],
+    },
+  };
+
   let myStats = null;
-  let matchCtx = null; // {mode, player, opponent, difficulty?}
+  let matchCtx = null; // {mode, player, opponent, difficulty?, mapId}
+  let selectedMapId = "hkex";
+
+  function currentMap() {
+    return MAPS[selectedMapId] || MAPS.hkex;
+  }
+
+  function bindMapPicker() {
+    const box = $("#mapPicker");
+    if (!box || box._bound) return;
+    box._bound = true;
+    box.querySelectorAll(".map-option").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        selectedMapId = btn.dataset.map || "hkex";
+        box.querySelectorAll(".map-option").forEach((b) => {
+          const on = b.dataset.map === selectedMapId;
+          b.classList.toggle("selected", on);
+          b.setAttribute("aria-checked", on ? "true" : "false");
+        });
+      });
+    });
+  }
 
   async function loadLobby() {
     const me = await api("/api/auth/me");
@@ -102,6 +211,8 @@
 
   function showArena(ctx) {
     matchCtx = ctx;
+    selectedMapId = ctx.mapId || selectedMapId || "hkex";
+    ctx.mapId = selectedMapId;
     $("#lobby").classList.add("hidden");
     $("#arena").classList.remove("hidden");
     $("#resultOverlay").classList.add("hidden");
@@ -109,6 +220,9 @@
     $("#p2Name").textContent = ctx.opponent.display_name || ctx.opponent.username;
     $("#p1Mini").textContent = `攻${ctx.player.atk} 防${ctx.player.def} 速${ctx.player.spd}`;
     $("#p2Mini").textContent = `攻${ctx.opponent.atk} 防${ctx.opponent.def} 速${ctx.opponent.spd}`;
+    const map = MAPS[selectedMapId] || MAPS.hkex;
+    const label = $("#mapLabel");
+    if (label) label.textContent = map.name;
     Game.start(ctx);
     Game.refreshVirtPad();
   }
@@ -128,7 +242,7 @@
     try {
       const diff = $("#aiDiff").value;
       const opp = await api(`/api/fighter/ai?difficulty=${encodeURIComponent(diff)}&mirror=1`);
-      showArena({ mode: "ai", player: myStats, opponent: opp, difficulty: diff });
+      showArena({ mode: "ai", player: myStats, opponent: opp, difficulty: diff, mapId: selectedMapId });
     } catch (e) {
       toast(e.message);
     }
@@ -150,7 +264,12 @@
         body: JSON.stringify({ opponent_username: name }),
       });
       myStats = data.player;
-      showArena({ mode: "classmate", player: data.player, opponent: data.opponent });
+      showArena({
+        mode: "classmate",
+        player: data.player,
+        opponent: data.opponent,
+        mapId: selectedMapId,
+      });
     } catch (e) {
       msg.textContent = e.message;
       msg.classList.add("err");
@@ -160,6 +279,7 @@
   $("#btnRematch").onclick = () => {
     if (!matchCtx) return;
     $("#resultOverlay").classList.add("hidden");
+    matchCtx.mapId = selectedMapId || matchCtx.mapId;
     if (matchCtx.mode === "ai") {
       api(`/api/fighter/ai?difficulty=${encodeURIComponent(matchCtx.difficulty || "normal")}&mirror=1`)
         .then((opp) => {
@@ -187,9 +307,6 @@
     const ctx = canvas.getContext("2d");
     const W = 960,
       H = 540;
-    const GROUND_Y = 420;
-    const PLATFORM = { x: 120, y: GROUND_Y, w: 720, h: 28 };
-    const BLAST = { left: -80, right: W + 80, top: -120, bottom: H + 100 };
 
     let running = false;
     let raf = 0;
@@ -198,15 +315,46 @@
     let matchMeta = null;
     let particles = [];
     let aiState = { cool: 0, jumpCool: 0 };
+    let mapState = null; // live platforms + blast + spawn
+    let tick = 0;
+
+    function cloneMap(mapId) {
+      const src = MAPS[mapId] || MAPS.hkex;
+      const platforms = src.platforms.map((p) => {
+        const pl = { ...p, ox: p.x, oy: p.y, dir: 1, rider: null };
+        if (p.kind === "moving") {
+          pl.x = p.x;
+          pl.y = p.y;
+          pl.dir = 1;
+        }
+        return pl;
+      });
+      return {
+        id: src.id,
+        name: src.name,
+        ticker: src.ticker,
+        bg: { ...src.bg },
+        blast: { ...src.blast },
+        spawn: { ...src.spawn },
+        platforms,
+      };
+    }
+
+    function mainFloorY() {
+      const mains = mapState.platforms.filter((p) => p.kind === "main");
+      if (!mains.length) return mapState.spawn.groundY || 420;
+      return Math.min(...mains.map((p) => p.y));
+    }
 
     function fighter(stats, x, facing, color, isAI) {
       const atk = stats.atk || 50,
         def = stats.def || 50,
         spd = stats.spd || 50;
+      const gy = mainFloorY();
       return {
         stats,
         x,
-        y: GROUND_Y - 48,
+        y: gy - 48,
         vx: 0,
         vy: 0,
         w: 36,
@@ -215,6 +363,7 @@
         color,
         damage: 0,
         onGround: true,
+        onPlat: null,
         jumps: 2,
         atkTimer: 0,
         atkCool: 0,
@@ -222,7 +371,6 @@
         invuln: 0,
         smash: false,
         isAI: !!isAI,
-        // derived
         moveSpd: 3.2 + (spd - 50) * 0.06,
         airSpd: 3.0 + (spd - 50) * 0.05,
         jumpV: -11.2 - (spd - 50) * 0.04,
@@ -233,22 +381,25 @@
     }
 
     function resetRoundPositions() {
-      p1.x = 280;
-      p1.y = GROUND_Y - 48;
+      const gy = mainFloorY();
+      p1.x = mapState.spawn.p1x;
+      p1.y = gy - p1.h;
       p1.vx = p1.vy = 0;
       p1.damage = 0;
       p1.facing = 1;
       p1.onGround = true;
+      p1.onPlat = null;
       p1.jumps = 2;
       p1.hitstun = 0;
       p1.invuln = 45;
       p1.atkTimer = p1.atkCool = 0;
-      p2.x = 640;
-      p2.y = GROUND_Y - 48;
+      p2.x = mapState.spawn.p2x;
+      p2.y = gy - p2.h;
       p2.vx = p2.vy = 0;
       p2.damage = 0;
       p2.facing = -1;
       p2.onGround = true;
+      p2.onPlat = null;
       p2.jumps = 2;
       p2.hitstun = 0;
       p2.invuln = 45;
@@ -260,11 +411,8 @@
     function updateHud() {
       $("#p1Pct").textContent = Math.floor(p1.damage) + "%";
       $("#p2Pct").textContent = Math.floor(p2.damage) + "%";
-      const dot = (n) => "●".repeat(n) + "○".repeat(Math.max(0, kosToWin - n));
-      // stocks remaining
       $("#p1Stocks").textContent = "●".repeat(stocks.p1) + "○".repeat(Math.max(0, kosToWin - stocks.p1));
       $("#p2Stocks").textContent = "●".repeat(stocks.p2) + "○".repeat(Math.max(0, kosToWin - stocks.p2));
-      // color by damage
       $("#p1Pct").style.color = dmgColor(p1.damage);
       $("#p2Pct").style.color = dmgColor(p2.damage);
     }
@@ -279,11 +427,15 @@
     function start(meta) {
       stop();
       matchMeta = meta;
+      mapState = cloneMap(meta.mapId || selectedMapId || "hkex");
+      const label = $("#mapLabel");
+      if (label) label.textContent = mapState.name;
       kosToWin = 2;
       stocks = { p1: kosToWin, p2: kosToWin };
-      p1 = fighter(meta.player, 280, 1, "#3b82f6", false);
-      p2 = fighter(meta.opponent, 640, -1, "#ea3943", true);
-      roundLock = 90; // countdown frames
+      p1 = fighter(meta.player, mapState.spawn.p1x, 1, "#3b82f6", false);
+      p2 = fighter(meta.opponent, mapState.spawn.p2x, -1, "#ea3943", true);
+      roundLock = 90;
+      tick = 0;
       $("#roundMsg").textContent = "準備…";
       $("#resultOverlay").classList.add("hidden");
       running = true;
@@ -305,7 +457,11 @@
 
     function onKey(e, down) {
       const k = e.key;
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "z", "Z", "j", "J", "w", "W", "a", "A", "d", "D", "s", "S"].includes(k)) {
+      if (
+        ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "z", "Z", "j", "J", "w", "W", "a", "A", "d", "D", "s", "S"].includes(
+          k
+        )
+      ) {
         e.preventDefault();
       }
       keys[k] = down;
@@ -413,6 +569,7 @@
       if (f.jumps > 0) {
         f.vy = f.jumpV * (f.jumps === 2 ? 1 : 0.85);
         f.onGround = false;
+        f.onPlat = null;
         f.jumps--;
       }
     }
@@ -457,6 +614,7 @@
         defender.vy = Math.sin(angle) * kb * 14;
         defender.hitstun = Math.min(40, 8 + defender.damage * 0.08);
         defender.onGround = false;
+        defender.onPlat = null;
         attacker.atkTimer = 0;
         for (let i = 0; i < 8; i++) {
           particles.push({
@@ -472,11 +630,59 @@
       }
     }
 
+    function updateMovingPlatforms() {
+      for (const pl of mapState.platforms) {
+        if (pl.kind !== "moving") {
+          pl._dx = 0;
+          pl._dy = 0;
+          continue;
+        }
+        const prevX = pl.x;
+        const prevY = pl.y;
+        const speed = pl.speed || 1.2;
+        if (pl.axis === "y") {
+          pl.y += speed * pl.dir;
+          if (pl.y >= pl.max) {
+            pl.y = pl.max;
+            pl.dir = -1;
+          } else if (pl.y <= pl.min) {
+            pl.y = pl.min;
+            pl.dir = 1;
+          }
+        } else {
+          pl.x += speed * pl.dir;
+          if (pl.x >= pl.max) {
+            pl.x = pl.max;
+            pl.dir = -1;
+          } else if (pl.x <= pl.min) {
+            pl.x = pl.min;
+            pl.dir = 1;
+          }
+        }
+        pl._dx = pl.x - prevX;
+        pl._dy = pl.y - prevY;
+      }
+    }
+
+    function landOnPlatform(f, pl) {
+      f.y = pl.y - f.h;
+      f.vy = 0;
+      f.onGround = true;
+      f.onPlat = pl;
+      f.jumps = 2;
+    }
+
     function physics(f) {
       if (f.invuln > 0) f.invuln--;
       if (f.hitstun > 0) f.hitstun--;
       if (f.atkCool > 0) f.atkCool--;
       if (f.atkTimer > 0) f.atkTimer--;
+
+      // ride moving platform before gravity integrate
+      if (f.onGround && f.onPlat && f.onPlat.kind === "moving") {
+        f.x += f.onPlat._dx || 0;
+        f.y += f.onPlat._dy || 0;
+      }
 
       const grav = 0.55;
       f.vy += grav;
@@ -484,22 +690,42 @@
       f.y += f.vy;
       f.vx *= f.onGround ? 0.75 : 0.92;
 
-      // platform
       const feet = f.y + f.h;
-      if (
-        f.vy >= 0 &&
-        feet >= PLATFORM.y &&
-        feet <= PLATFORM.y + 18 &&
-        f.x + f.w > PLATFORM.x + 8 &&
-        f.x < PLATFORM.x + PLATFORM.w - 8
-      ) {
-        f.y = PLATFORM.y - f.h;
-        f.vy = 0;
-        f.onGround = true;
-        f.jumps = 2;
-      } else if (feet > PLATFORM.y + 4) {
-        f.onGround = false;
+      let landed = null;
+      if (f.vy >= 0) {
+        for (const pl of mapState.platforms) {
+          if (
+            feet >= pl.y &&
+            feet <= pl.y + 18 &&
+            f.x + f.w > pl.x + 6 &&
+            f.x < pl.x + pl.w - 6
+          ) {
+            // prefer highest (smallest y) platform under feet this frame
+            if (!landed || pl.y < landed.y) landed = pl;
+          }
+        }
       }
+
+      if (landed) {
+        landOnPlatform(f, landed);
+      } else {
+        f.onGround = false;
+        f.onPlat = null;
+      }
+    }
+
+    function stageCenter() {
+      const mains = mapState.platforms.filter((p) => p.kind === "main");
+      if (!mains.length) return { x: W / 2, y: mainFloorY(), left: 100, right: W - 100 };
+      let left = Infinity,
+        right = -Infinity,
+        y = mains[0].y;
+      for (const m of mains) {
+        left = Math.min(left, m.x);
+        right = Math.max(right, m.x + m.w);
+        y = Math.min(y, m.y);
+      }
+      return { x: (left + right) / 2, y, left, right };
     }
 
     function controlP1() {
@@ -527,6 +753,7 @@
       const diff = (matchMeta.difficulty || "normal").toLowerCase();
       const react = diff === "easy" ? 0.55 : diff === "hard" ? 0.95 : 0.75;
       const spd = f.onGround ? f.moveSpd : f.airSpd;
+      const stage = stageCenter();
 
       if (Math.random() < react) {
         if (Math.abs(dx) > 50) {
@@ -540,10 +767,8 @@
           }
         }
       }
-      // recover toward stage
-      if (f.x < PLATFORM.x - 20 || f.x > PLATFORM.x + PLATFORM.w + 20 || f.y > GROUND_Y + 40) {
-        const mid = PLATFORM.x + PLATFORM.w / 2;
-        f.vx = Math.sign(mid - f.x) * f.airSpd * 1.1;
+      if (f.x < stage.left - 30 || f.x > stage.right + 30 || f.y > stage.y + 50) {
+        f.vx = Math.sign(stage.x - f.x) * f.airSpd * 1.1;
         if (aiState.jumpCool <= 0 && f.jumps > 0) {
           tryJump(f);
           aiState.jumpCool = 20;
@@ -555,6 +780,7 @@
     }
 
     function checkKO(f, who) {
+      const BLAST = mapState.blast;
       if (f.x + f.w < BLAST.left || f.x > BLAST.right || f.y > BLAST.bottom || f.y + f.h < BLAST.top) {
         if (who === "p1") stocks.p1--;
         else stocks.p2--;
@@ -589,7 +815,7 @@
       const ok = kosToWin - stocks.p1;
       $("#resultTitle").textContent =
         winner === "player" ? "勝利！" : winner === "opponent" ? "敗北…" : "平手";
-      $("#resultDetail").textContent = `比分 ${pk}–${ok}　（先至 ${kosToWin} KO）`;
+      $("#resultDetail").textContent = `比分 ${pk}–${ok}　（先至 ${kosToWin} KO）・${mapState.name}`;
       $("#resultOverlay").classList.remove("hidden");
       $("#roundMsg").textContent = "完場";
       try {
@@ -619,20 +845,77 @@
       }
     }
 
-    function draw() {
-      // sky
+    function drawBackground() {
+      const bg = mapState.bg;
       const g = ctx.createLinearGradient(0, 0, 0, H);
-      g.addColorStop(0, "#0b1a33");
-      g.addColorStop(1, "#132844");
+      g.addColorStop(0, bg.top);
+      g.addColorStop(1, bg.bottom);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
 
-      // stars
-      ctx.fillStyle = "rgba(255,255,255,.35)";
-      for (let i = 0; i < 40; i++) {
-        const sx = (i * 97) % W,
-          sy = (i * 53) % 280;
-        ctx.fillRect(sx, sy, 2, 2);
+      if (bg.theme === "hkex") {
+        ctx.fillStyle = "rgba(255,255,255,.35)";
+        for (let i = 0; i < 40; i++) {
+          ctx.fillRect((i * 97) % W, (i * 53) % 260, 2, 2);
+        }
+        // skyline
+        ctx.fillStyle = "rgba(30,58,95,.55)";
+        for (let i = 0; i < 12; i++) {
+          const bx = 40 + i * 80;
+          const bh = 60 + ((i * 37) % 90);
+          ctx.fillRect(bx, 280 - bh, 50, bh);
+        }
+      } else if (bg.theme === "wallstreet") {
+        ctx.fillStyle = "rgba(255,255,255,.25)";
+        for (let i = 0; i < 50; i++) {
+          ctx.fillRect((i * 73) % W, (i * 41) % 240, 2, 2);
+        }
+        ctx.fillStyle = "rgba(148,163,184,.28)";
+        const buildings = [
+          [30, 200],
+          [120, 260],
+          [210, 180],
+          [700, 220],
+          [790, 280],
+          [880, 190],
+        ];
+        for (const [bx, bh] of buildings) {
+          ctx.fillRect(bx, 450 - bh, 70, bh);
+          ctx.fillStyle = "rgba(251,191,36,.15)";
+          for (let wy = 450 - bh + 10; wy < 440; wy += 18) {
+            ctx.fillRect(bx + 10, wy, 8, 8);
+            ctx.fillRect(bx + 30, wy, 8, 8);
+            ctx.fillRect(bx + 50, wy, 8, 8);
+          }
+          ctx.fillStyle = "rgba(148,163,184,.28)";
+        }
+        // moon
+        ctx.fillStyle = "rgba(253,224,71,.35)";
+        ctx.beginPath();
+        ctx.arc(820, 70, 28, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (bg.theme === "vault") {
+        // vault wall rivets
+        ctx.fillStyle = "rgba(68,64,60,.8)";
+        ctx.fillRect(0, 0, 60, H);
+        ctx.fillRect(W - 60, 0, 60, H);
+        ctx.fillStyle = "rgba(217,119,6,.25)";
+        for (let y = 40; y < H; y += 40) {
+          ctx.beginPath();
+          ctx.arc(30, y, 6, 0, Math.PI * 2);
+          ctx.arc(W - 30, y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // door circle
+        ctx.strokeStyle = "rgba(251,191,36,.35)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(W / 2, 200, 70, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(251,191,36,.2)";
+        ctx.beginPath();
+        ctx.arc(W / 2, 200, 40, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       // blast zone hints
@@ -640,22 +923,39 @@
       ctx.setLineDash([6, 6]);
       ctx.strokeRect(40, 40, W - 80, H - 80);
       ctx.setLineDash([]);
+    }
 
-      // platform
-      ctx.fillStyle = "#334155";
-      roundRect(PLATFORM.x, PLATFORM.y, PLATFORM.w, PLATFORM.h, 8);
-      ctx.fill();
-      ctx.fillStyle = "#16c784";
-      ctx.fillRect(PLATFORM.x + 4, PLATFORM.y, PLATFORM.w - 8, 5);
-      // ticker flair
-      ctx.fillStyle = "rgba(230,237,243,.5)";
-      ctx.font = "12px monospace";
-      ctx.fillText("0700  ▲   AAPL  ▲   0005  ▼   SPY  ■", PLATFORM.x + 24, PLATFORM.y + 20);
+    function drawPlatforms() {
+      for (const pl of mapState.platforms) {
+        ctx.fillStyle = pl.color || "#334155";
+        roundRect(pl.x, pl.y, pl.w, pl.h, pl.kind === "main" ? 8 : 5);
+        ctx.fill();
+        ctx.fillStyle = pl.accent || "#16c784";
+        ctx.fillRect(pl.x + 3, pl.y, pl.w - 6, 4);
+        if (pl.kind === "moving") {
+          // motion chevrons
+          ctx.fillStyle = "rgba(255,255,255,.55)";
+          ctx.font = "10px sans-serif";
+          const tag = pl.axis === "y" ? "↕" : "↔";
+          ctx.fillText(tag, pl.x + pl.w / 2 - 4, pl.y + pl.h - 3);
+        }
+      }
+      // ticker on widest main
+      const mains = mapState.platforms.filter((p) => p.kind === "main");
+      if (mains.length) {
+        const m = mains.reduce((a, b) => (a.w >= b.w ? a : b));
+        ctx.fillStyle = "rgba(230,237,243,.5)";
+        ctx.font = "11px monospace";
+        ctx.fillText(mapState.ticker || "", m.x + 16, m.y + 20);
+      }
+    }
 
+    function draw() {
+      drawBackground();
+      drawPlatforms();
       drawFighter(p1);
       drawFighter(p2);
 
-      // particles
       for (const pt of particles) {
         if (pt.text) {
           ctx.fillStyle = pt.color;
@@ -677,6 +977,9 @@
         ctx.textAlign = "center";
         const t = roundLock > 60 ? "準備" : "開始！";
         ctx.fillText(t, W / 2, H / 2);
+        ctx.font = "16px sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.fillText(mapState.name, W / 2, H / 2 + 36);
         ctx.textAlign = "left";
       }
     }
@@ -694,28 +997,23 @@
     function drawFighter(f) {
       const blink = f.invuln > 0 && Math.floor(f.invuln / 3) % 2 === 0;
       if (blink) return;
-      // body
       ctx.fillStyle = f.color;
       roundRect(f.x, f.y, f.w, f.h, 6);
       ctx.fill();
-      // face / direction
       ctx.fillStyle = "#fff";
       const ey = f.y + 14;
       const ex = f.facing > 0 ? f.x + 22 : f.x + 6;
       ctx.fillRect(ex, ey, 6, 6);
-      // damage aura
       if (f.damage > 60) {
         ctx.strokeStyle = `rgba(251,191,36,${Math.min(0.8, f.damage / 200)})`;
         ctx.lineWidth = 2;
         ctx.strokeRect(f.x - 2, f.y - 2, f.w + 4, f.h + 4);
       }
-      // attack flash
       const box = attackBox(f);
       if (box) {
         ctx.fillStyle = box.smash ? "rgba(251,191,36,.55)" : "rgba(255,255,255,.4)";
         ctx.fillRect(box.x, box.y, box.w, box.h);
       }
-      // name tag
       ctx.fillStyle = "rgba(0,0,0,.45)";
       ctx.font = "11px sans-serif";
       const label = f.isAI ? "AI" : "YOU";
@@ -725,13 +1023,17 @@
     function loop() {
       if (!running) return;
       raf = requestAnimationFrame(loop);
+      tick++;
       if (roundLock > 0) {
+        // still animate platforms during countdown for visual life
+        updateMovingPlatforms();
         roundLock--;
         if (roundLock === 30) $("#roundMsg").textContent = "開始！";
         if (roundLock === 0) $("#roundMsg").textContent = "擊飛出界！";
         draw();
         return;
       }
+      updateMovingPlatforms();
       controlP1();
       controlAI();
       physics(p1);
@@ -751,8 +1053,12 @@
       draw();
     }
 
-    return { start, stop, refreshVirtPad };
+    return { start, stop, refreshVirtPad, MAPS };
   })();
 
+  // expose map catalog for tests / debugging
+  window.__FIGHTER_MAPS__ = MAPS;
+
+  bindMapPicker();
   loadLobby().catch((e) => toast(e.message));
 })();

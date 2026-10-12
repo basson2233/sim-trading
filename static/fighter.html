@@ -35,6 +35,24 @@
       </div>
       <div class="panel">
         <h3>對戰模式</h3>
+        <div class="mode-card map-picker-card">
+          <h4>🗺️ 選擇地圖</h4>
+          <p class="muted">每張地圖有高低差平台，第二層平台會移動並帶住戰士。</p>
+          <div id="mapPicker" class="map-picker" role="radiogroup" aria-label="戰鬥地圖">
+            <button type="button" class="map-option selected" data-map="hkex" role="radio" aria-checked="true">
+              <span class="map-thumb hkex"></span>
+              <span class="map-meta"><strong>港交所擂台</strong><small>主擂台＋中層浮台，一層會左右移動</small></span>
+            </button>
+            <button type="button" class="map-option" data-map="wallstreet" role="radio" aria-checked="false">
+              <span class="map-thumb wallstreet"></span>
+              <span class="map-meta"><strong>華爾街夜景</strong><small>分層懸崖，中層平台左右穿梭</small></span>
+            </button>
+            <button type="button" class="map-option" data-map="vault" role="radio" aria-checked="false">
+              <span class="map-thumb vault"></span>
+              <span class="map-meta"><strong>銀行金庫</strong><small>較窄擂台，高低差大，第二層上下移動</small></span>
+            </button>
+          </div>
+        </div>
         <div class="mode-card">
           <h4>🤖 對戰 AI 練習</h4>
           <p class="muted">隨時練習，贏兩局先勝（先至 2 KO）</p>
@@ -71,6 +89,7 @@
         <div class="hud-mini" id="p1Mini"></div>
       </div>
       <div class="hud-center">
+        <div id="mapLabel" class="map-label">港交所擂台</div>
         <div id="roundMsg" class="round-msg">準備</div>
         <button id="btnBack" class="btn ghost small">返回大廳</button>
       </div>
