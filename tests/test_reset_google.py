@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import FORGOT_MESSAGE, GoogleOAuth, AuthService
-from app.engine import Engine
+from app.engine import DEFAULT_INITIAL_CASH,  Engine
 from app.main import create_app
 
 PW = "correct-horse-1"
@@ -269,8 +269,8 @@ def test_google_creates_new_user(feed, tmp_path):
     assert me["username"] == "newperson2" and me["email"] == "new.person@example.com"
     assert me["has_password"] is False and me["google"] is True and me["email_verified"] is True
     p = c.get("/api/me/portfolio").json()
-    assert next(a for a in p["accounts"] if a["currency"] == "HKD")["cash"] == 1_000_000
-    assert next(a for a in p["accounts"] if a["currency"] == "USD")["cash"] == 100_000
+    assert next(a for a in p["accounts"] if a["currency"] == "HKD")["cash"] == DEFAULT_INITIAL_CASH["HKD"]
+    assert next(a for a in p["accounts"] if a["currency"] == "USD")["cash"] == DEFAULT_INITIAL_CASH["USD"]
     # signing in again with the same sub logs into the same account (no second user)
     c.post("/api/auth/logout")
     start = c.get("/auth/google/start")

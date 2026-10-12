@@ -5,7 +5,7 @@ import pytest
 
 from app.auth import (AuthError, AuthService, RateLimited, _token_hash, hash_password, validate_password,
                       verify_password)
-from app.engine import Engine, TradingError
+from app.engine import DEFAULT_INITIAL_CASH, Engine, TradingError
 
 PW = "correct-horse-1"
 
@@ -168,4 +168,4 @@ def test_concurrent_access_is_safe(tmp_path, feed):
         t.join()
     assert errors == []
     assert len(eng.trades("alice")) == 160
-    assert next(x for x in eng.portfolio("alice")["accounts"] if x["currency"] == "USD")["cash"] == 100_000
+    assert next(x for x in eng.portfolio("alice")["accounts"] if x["currency"] == "USD")["cash"] == DEFAULT_INITIAL_CASH["USD"]

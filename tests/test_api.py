@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.engine import DEFAULT_INITIAL_CASH
 from app.main import COOKIE, create_app
 from app.quotes import SimFeed
 
@@ -98,16 +99,16 @@ def test_buy_sell_flow_acts_on_logged_in_user_only(app):
     r = alice.post("/api/me/orders", json={"symbol": "0700.HK", "side": "BUY", "type": "MARKET", "qty": 300})
     assert r.status_code == 200 and r.json()["status"] == "FILLED"
     p = alice.get("/api/me/portfolio").json()
-    assert p["username"] == "alice" and hkd(p)["cash"] == 880_000 and p["positions"][0]["qty"] == 300
+    assert p["username"] == "alice" and hkd(p)["cash"] == DEFAULT_INITIAL_CASH["HKD"] - 120_000 and p["positions"][0]["qty"] == 300
     r = alice.post("/api/me/orders", json={"symbol": "0700.HK", "side": "SELL", "type": "MARKET", "qty": 100})
     assert r.json()["status"] == "FILLED"
     p = alice.get("/api/me/portfolio").json()
-    assert hkd(p)["cash"] == 920_000 and p["positions"][0]["qty"] == 200
+    assert hkd(p)["cash"] == DEFAULT_INITIAL_CASH["HKD"] - 80_000 and p["positions"][0]["qty"] == 200
     assert len(alice.get("/api/me/trades").json()) == 2
 
     # bob sees only his own (empty) account and cannot touch alice's orders
     pb = bob.get("/api/me/portfolio").json()
-    assert pb["username"] == "bob" and pb["positions"] == [] and hkd(pb)["cash"] == 1_000_000
+    assert pb["username"] == "bob" and pb["positions"] == [] and hkd(pb)["cash"] == DEFAULT_INITIAL_CASH["HKD"]
     assert bob.get("/api/me/orders").json() == [] and bob.get("/api/me/trades").json() == []
     lim = alice.post("/api/me/orders", json={"symbol": "AAPL", "side": "BUY", "type": "LIMIT", "qty": 1,
                                               "limit_price": 1}).json()

@@ -21,7 +21,8 @@ from datetime import datetime, timedelta, timezone
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 
 HKT = timezone(timedelta(hours=8))
-DEFAULT_INITIAL_CASH = {"HKD": 1_000_000.0, "USD": 100_000.0}
+# New accounts / reset: HKD 500,000 + USD 64,000 ≈ HKD 999,200 at USD/HKD 7.8 (~1M HKD total).
+DEFAULT_INITIAL_CASH = {"HKD": 500_000.0, "USD": 64_000.0}
 BASE_CURRENCY = "HKD"
 
 
