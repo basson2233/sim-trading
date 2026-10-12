@@ -20,8 +20,8 @@ COPY static ./static
 COPY run.sh ./run.sh
 RUN chmod +x run.sh && mkdir -p /data
 
-# SQLite + password-reset log live on the persistent volume at APP_DATA_DIR.
-VOLUME ["/data"]
+# SQLite + password-reset log live on the host/volume at APP_DATA_DIR.
+# Do not use Docker VOLUME here — Railway rejects it; mount a Railway volume at /data instead.
 EXPOSE 8000
 
 # Render and similar platforms inject $PORT; bind all interfaces inside the container.
