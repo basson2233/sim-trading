@@ -17,6 +17,7 @@ from .auth import OAUTH_STATE_TTL
 from .engine import Engine, TradingError
 from .quotes import RANGES, UnknownSymbol, make_feed
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
+from .universe import suggest_symbols
 
 log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
@@ -226,6 +227,12 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         except Exception as e:  # pragma: no cover
             return {"ok": True, "price_source": "error", "error": str(e)}
         return {"ok": True, "price_mode": os.environ.get("PRICE_SOURCE", "auto"), "price_source": q.source}
+
+    @app.get("/api/symbols/suggest")
+    def symbols_suggest(q: str = Query("", max_length=64), limit: int = Query(10, ge=1, le=25),
+                        user=Depends(current_user)):
+        """Autocomplete: match built-in HK/US symbols by code prefix or name."""
+        return {"query": q, "results": suggest_symbols(q, limit)}
 
     @app.get("/api/quote")
     def quote(symbol: str, user=Depends(current_user)):

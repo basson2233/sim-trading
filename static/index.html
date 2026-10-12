@@ -31,8 +31,11 @@
     <div class="panel">
       <div class="panel-head">
         <form id="searchForm" class="search">
-          <input id="symbolInput" placeholder="輸入代號，例如 0700.HK、700、AAPL" autocomplete="off">
-          <button class="btn">查詢</button>
+          <div class="suggest-wrap">
+            <input id="symbolInput" placeholder="輸入代號或名稱，例如 07、騰訊、AAPL" autocomplete="off" aria-autocomplete="list" aria-controls="suggestBox" aria-expanded="false">
+            <ul id="suggestBox" class="suggest-box hidden" role="listbox" aria-label="股票代號建議"></ul>
+          </div>
+          <button class="btn" type="submit">查詢</button>
         </form>
         <div class="chips" id="quickChips"></div>
       </div>

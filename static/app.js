@@ -304,12 +304,104 @@ function seg(id, key, after) {
 }
 function refreshAll() { refreshAccount(); loadSymbol(state.symbol); }
 
+// ---------------------------------------------------------------- symbol autocomplete
+let suggestTimer = null, suggestItems = [], suggestIdx = -1, suggestReq = 0;
+
+function hideSuggest() {
+  const box = $("#suggestBox"), inp = $("#symbolInput");
+  if (!box) return;
+  box.classList.add("hidden"); box.innerHTML = "";
+  suggestItems = []; suggestIdx = -1;
+  if (inp) inp.setAttribute("aria-expanded", "false");
+}
+
+function renderSuggest(items) {
+  const box = $("#suggestBox"), inp = $("#symbolInput");
+  suggestItems = items || []; suggestIdx = items.length ? 0 : -1;
+  if (!items.length) { hideSuggest(); return; }
+  box.innerHTML = items.map((it, i) => {
+    const mkt = it.market === "HK" ? "港股" : "美股";
+    return `<li role="option" data-i="${i}" class="${i === 0 ? "active" : ""}">` +
+      `<span><span class="s-sym">${esc(it.symbol)}</span> <span class="s-name">${esc(it.name)}</span></span>` +
+      `<span class="s-mkt">${mkt}</span></li>`;
+  }).join("");
+  box.classList.remove("hidden");
+  inp.setAttribute("aria-expanded", "true");
+}
+
+function highlightSuggest(i) {
+  suggestIdx = i;
+  $$("#suggestBox li").forEach((li, n) => li.classList.toggle("active", n === i));
+  const active = $("#suggestBox li.active");
+  if (active) active.scrollIntoView({block: "nearest"});
+}
+
+async function fetchSuggest(q) {
+  const req = ++suggestReq;
+  if (!q.trim()) { hideSuggest(); return; }
+  try {
+    const data = await api(`/api/symbols/suggest?q=${encodeURIComponent(q)}&limit=10`);
+    if (req !== suggestReq) return;
+    renderSuggest(data.results || []);
+  } catch {
+    if (req === suggestReq) hideSuggest();
+  }
+}
+
+function pickSuggest(i) {
+  const it = suggestItems[i];
+  if (!it) return;
+  $("#symbolInput").value = it.symbol;
+  hideSuggest();
+  loadSymbol(it.symbol);
+}
+
+function wireSuggest() {
+  const inp = $("#symbolInput"), box = $("#suggestBox");
+  if (!inp || !box) return;
+  inp.addEventListener("input", () => {
+    clearTimeout(suggestTimer);
+    const q = inp.value;
+    suggestTimer = setTimeout(() => fetchSuggest(q), 120);
+  });
+  inp.addEventListener("keydown", (e) => {
+    if (box.classList.contains("hidden") || !suggestItems.length) {
+      if (e.key === "Escape") hideSuggest();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      highlightSuggest(Math.min(suggestIdx + 1, suggestItems.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      highlightSuggest(Math.max(suggestIdx - 1, 0));
+    } else if (e.key === "Enter" && suggestIdx >= 0) {
+      e.preventDefault();
+      pickSuggest(suggestIdx);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hideSuggest();
+    }
+  });
+  box.addEventListener("mousedown", (e) => {
+    const li = e.target.closest("li"); if (!li) return;
+    e.preventDefault();
+    pickSuggest(Number(li.dataset.i));
+  });
+  inp.addEventListener("blur", () => setTimeout(hideSuggest, 150));
+}
+
+
 function init() {
   $("#quickChips").innerHTML = QUICK.map((s) => `<span class="chip" data-sym="${s}">${s}</span>`).join("");
   $("#ranges").innerHTML = RANGES.map(([k, l]) => `<button data-r="${k}" class="${k === state.range ? "on" : ""}">${l}</button>`).join("");
   $("#ranges").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return;
     state.range = b.dataset.r; $$("#ranges button").forEach((x) => x.classList.toggle("on", x === b)); loadChart(); });
-  $("#searchForm").addEventListener("submit", (e) => { e.preventDefault(); const v = $("#symbolInput").value.trim(); if (v) loadSymbol(v); });
+  wireSuggest();
+  $("#searchForm").addEventListener("submit", (e) => {
+    e.preventDefault(); hideSuggest();
+    const v = $("#symbolInput").value.trim(); if (v) loadSymbol(v);
+  });
   document.body.addEventListener("click", async (e) => {
     const t = e.target;
     if (t.dataset.sym) { loadSymbol(t.dataset.sym); window.scrollTo({top: 0, behavior: "smooth"}); }
