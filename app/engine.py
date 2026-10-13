@@ -320,10 +320,31 @@ class Engine:
                                (cur.lastrowid, ccy, amt, amt))
             return {"id": cur.lastrowid, "username": username}
 
-    def delete_user_data(self, db, user_id):
+    def delete_user_data(self, db, user_id, username=None):
         for t in ("positions", "orders", "trades", "cash", "sessions", "password_resets"):
             db.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
+        if username:
+            db.execute(
+                "DELETE FROM fighter_matches WHERE player_username = ? OR opponent_username = ?",
+                (username, username))
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+    def delete_user_by_credentials(self, username, email=None):
+        """Delete one user and related rows. If email is given it must match (case-insensitive).
+        Returns a short status string for logs; never touches other users."""
+        username = (username or "").strip()
+        if not username:
+            return "skipped: empty username"
+        email = (email or "").strip().lower() or None
+        with self.lock:
+            row = self.db.execute("SELECT id, username, email FROM users WHERE username = ?", (username,)).fetchone()
+            if not row:
+                return f"not_found: {username}"
+            if email and (row["email"] or "").lower() != email:
+                return f"email_mismatch: {username}"
+            with self._tx() as db:
+                self.delete_user_data(db, row["id"], username=row["username"])
+            return f"deleted: id={row['id']} username={row['username']}"
 
     def list_users(self):
         return [r["username"] for r in self.db.execute("SELECT username FROM users ORDER BY username")]

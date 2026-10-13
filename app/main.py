@@ -57,6 +57,12 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     removed = auth.migrate_legacy_users()
     if removed:
         print(f"[migration] removed legacy password-less users: {removed}", flush=True)
+    # One-shot admin delete via env (set DELETE_USER_USERNAME[+EMAIL], redeploy, then unset).
+    del_user = os.environ.get("DELETE_USER_USERNAME", "").strip()
+    if del_user:
+        del_email = os.environ.get("DELETE_USER_EMAIL", "").strip()
+        status = engine.delete_user_by_credentials(del_user, del_email or None)
+        print(f"[admin] DELETE_USER_USERNAME={del_user!r}: {status}", flush=True)
     interval = pending_interval if pending_interval is not None else float(os.environ.get("PENDING_INTERVAL", 10))
     if cookie_secure is None:
         cookie_secure = os.environ.get("COOKIE_SECURE", "0") == "1"
