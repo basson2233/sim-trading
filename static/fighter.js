@@ -28,8 +28,8 @@
     el.innerHTML = ["atk", "def", "spd"]
       .map((k) => {
         const label = { atk: "攻擊", def: "防禦", spd: "速度" }[k];
-        const v = s[k] ?? 50;
-        const pct = Math.round(((v - 30) / 69) * 100);
+        const v = s[k] ?? 100;
+        const pct = Math.max(0, Math.min(100, Math.round(((v - 100) / 50) * 100)));
         return `<div class="stat-row">
           <span class="label ${k}">${label}</span>
           <div class="bar-track"><div class="bar-fill ${k}" style="width:${pct}%"></div></div>
@@ -42,13 +42,17 @@
   function breakdownHtml(s) {
     const rows = (s.breakdown || []).slice(0, 12);
     if (!rows.length) {
-      return `<p class="muted">暫無持倉——屬性接近基礎值。買入成長股↑攻擊、銀行／公用↑防禦、ETF／高流動↑速度。</p>`;
+      return `<p class="muted">暫無持倉——屬性為基礎 100。買入成長股↑攻擊、銀行／公用↑防禦、ETF／高流動↑速度（每市值 USD 1 萬加 1 點）。</p>`;
     }
     const aff = { atk: "攻擊", def: "防禦", spd: "速度" };
-    return `<table><thead><tr><th class="l">代號</th><th>主屬性</th><th>市值比重</th></tr></thead><tbody>${rows
+    return `<table><thead><tr><th class="l">代號</th><th>主屬性</th><th>市值 (USD)</th><th>加點</th></tr></thead><tbody>${rows
       .map(
-        (r) =>
-          `<tr><td class="l">${r.symbol}</td><td>${aff[r.affinity] || r.affinity}</td><td>${(r.weight * 100).toFixed(1)}%</td></tr>`
+        (r) => {
+          const pts = r.points || r.contrib || {};
+          const add = Object.values(pts).reduce((a, b) => a + Number(b || 0), 0);
+          const mv = r.market_value_usd ?? r.market_value_base ?? 0;
+          return `<tr><td class="l">${r.symbol}</td><td>${aff[r.affinity] || r.affinity}</td><td>${Number(mv).toLocaleString()}</td><td>+${add.toFixed(1)}</td></tr>`;
+        }
       )
       .join("")}</tbody></table>`;
   }
@@ -58,7 +62,7 @@
     hkex: {
       id: "hkex",
       name: "港交所擂台",
-      ticker: "0700  ▲   0388  ▲   0005  ▼   HSI  ■",
+      ticker: "AAPL  ▲   NVDA  ▲   JPM  ▼   SPY  ■",
       bg: { top: "#0b1a33", bottom: "#132844", accent: "#16c784", stars: true, theme: "hkex" },
       blast: { left: -80, right: 1040, top: -120, bottom: 640 },
       spawn: { p1x: 260, p2x: 660, groundY: 430 },

@@ -30,8 +30,8 @@ class FakeFeed:
 
 @pytest.fixture
 def feed():
-    return FakeFeed({"0700.HK": 400.0, "0005.HK": 100.0, "9988.HK": 130.0,
-                     "AAPL": 200.0, "TSLA": 300.0, "NVDA": 150.0})
+    return FakeFeed({"AAPL": 200.0, "TSLA": 300.0, "NVDA": 150.0, "JPM": 100.0,
+                     "JNJ": 160.0, "SPY": 500.0, "MSFT": 400.0})
 
 
 @pytest.fixture

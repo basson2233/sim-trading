@@ -1,8 +1,8 @@
 """Paper-trading engine: users, cash, positions, orders, trades, leaderboard.
 
 Design
-- Each user holds two separate cash wallets: HKD (for HK stocks) and USD (for US stocks).
-  A HK stock can only be bought with HKD, a US stock with USD -> no FX in trading.
+- Trading is US stocks only (USD wallet). Legacy HKD cash wallets may still exist for older accounts.
+  New trades use USD only; HK symbols are rejected at normalize / place_order.
 - For the leaderboard / combined totals only, USD is converted to HKD (base currency)
   at the current USD/HKD rate. The *initial* capital is converted at the same rate, so
   FX moves do not change anyone's return %; ranking reflects trading performance only.
@@ -245,7 +245,7 @@ class Engine:
         except UnknownSymbol as e:
             raise TradingError(str(e))
         if q.currency != currency_of(symbol):
-            raise TradingError(f"{symbol} 以 {q.currency} 報價，暫時只支援港股 (HKD) 同美股 (USD)")
+            raise TradingError(f"{symbol} 以 {q.currency} 報價，暫時只支援美股 (USD)")
         if not q.price or q.price <= 0:
             raise TradingError(f"{symbol} 暫時冇有效報價")
         return q
@@ -317,6 +317,8 @@ class Engine:
             symbol = normalize(symbol)
         except SymbolError as e:
             raise TradingError(str(e))
+        if market_of(symbol) == "HK" or symbol.endswith(".HK"):
+            raise TradingError(f"已唔再支援港股：{symbol}（請用美股代號）")
         try:
             qty_f = float(qty)
         except (TypeError, ValueError):

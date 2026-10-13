@@ -10,12 +10,12 @@ const pct = (n) => n == null ? "-" : `${sign(n)}${fmt(n, 2)}%`;
 const tHK = (iso) => iso ? iso.replace("T", " ").slice(0, 19).replace(/\+08:00$/, "") : "-";
 const SIDE = {BUY: "買入", SELL: "賣出"}, TYPE = {MARKET: "市價", LIMIT: "限價"};
 const STATUS = {FILLED: "已成交", PENDING: "等待成交", CANCELLED: "已取消"};
-const QUICK = ["0700.HK", "0005.HK", "9988.HK", "3690.HK", "1810.HK", "AAPL", "TSLA", "NVDA", "MSFT"];
+const QUICK = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "JPM", "SPY"];
 const RANGES = [["1D", "1日"], ["5D", "5日"], ["1M", "1個月"], ["6M", "6個月"], ["1Y", "1年"], ["5Y", "5年"]];
 
 const state = {
   user: null,
-  symbol: localStorage.getItem("simSymbol") || "0700.HK",
+  symbol: (() => { const s = localStorage.getItem("simSymbol") || "AAPL"; return s.endsWith(".HK") ? "AAPL" : s; })(),
   quote: null, range: "1M", side: "BUY", type: "MARKET", hist: "trades",
   portfolio: null, chart: null,
 };
@@ -320,7 +320,7 @@ function renderSuggest(items) {
   suggestItems = items || []; suggestIdx = items.length ? 0 : -1;
   if (!items.length) { hideSuggest(); return; }
   box.innerHTML = items.map((it, i) => {
-    const mkt = it.market === "HK" ? "港股" : "美股";
+    const mkt = "美股";
     return `<li role="option" data-i="${i}" class="${i === 0 ? "active" : ""}">` +
       `<span><span class="s-sym">${esc(it.symbol)}</span> <span class="s-name">${esc(it.name)}</span></span>` +
       `<span class="s-mkt">${mkt}</span></li>`;

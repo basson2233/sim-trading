@@ -1,8 +1,8 @@
-"""Tests for 理財戰士: market-value-weighted ATK/DEF/SPD + API."""
+"""Tests for 理財戰士: base 100 + 1 per USD 10k MV + API."""
 import pytest
 from fastapi.testclient import TestClient
 
-from app.fighter import affinity_of, ai_stats, compute_fighter_stats
+from app.fighter import BASE_STAT, MV_PER_POINT, affinity_of, ai_stats, compute_fighter_stats
 from app.main import create_app
 
 PW = "secret-pass-1"
@@ -25,59 +25,52 @@ def app(feed):
 
 
 def test_affinity_themes():
-    assert affinity_of("0700.HK")[0] == "atk"
-    assert affinity_of("0005.HK")[0] == "def"
-    assert affinity_of("SPY")[0] == "spd"
-    assert affinity_of("0388.HK")[0] == "spd"
     assert affinity_of("NVDA")[0] == "atk"
+    assert affinity_of("JPM")[0] == "def"
+    assert affinity_of("SPY")[0] == "spd"
     assert affinity_of("JNJ")[0] == "def"
+    assert affinity_of("AAPL")[0] == "atk"
     # unknown still returns a primary
-    assert affinity_of("ZZZZ.HK")[0] in ("atk", "def", "spd")
+    assert affinity_of("ZZZZ")[0] in ("atk", "def", "spd")
 
 
-def test_stats_weight_by_market_value_not_shares(eng, feed):
-    """Larger market value in ATK names → higher ATK even with fewer shares."""
-    # Buy lots of DEF (0005.HK @ 100) vs fewer but similar $ of ATK (0700.HK @ 400)
-    # 400 shares of 0005 = 40,000 HKD DEF
-    eng.place_order("alice", "0005.HK", "BUY", "MARKET", 400)
-    # 100 shares of 0700 = 40,000 HKD ATK
-    eng.place_order("alice", "0700.HK", "BUY", "MARKET", 100)
-    pf = eng.portfolio("alice")
-    s = compute_fighter_stats(pf)
-    # Equal MV → both boosted; ATK and DEF should both be well above base-ish
-    assert s["atk"] > 50
-    assert s["def"] > 50
-    # Now add huge ATK position: 500 * 400 = 200,000 HKD ATK
-    eng.place_order("alice", "0700.HK", "BUY", "MARKET", 500)
-    s2 = compute_fighter_stats(eng.portfolio("alice"))
-    assert s2["atk"] > s["atk"]
-    assert s2["atk"] > s2["def"]
-    # breakdown weights sum roughly to invested/equity
-    assert any(b["symbol"] == "0700.HK" and b["affinity"] == "atk" for b in s2["breakdown"])
-    for b in s2["breakdown"]:
-        assert "market_value_base" in b and b["weight"] > 0
-
-
-def test_cash_heavy_near_base(eng):
+def test_stats_plus_one_per_10k_usd(eng, feed):
+    """$30k NVDA (ATK) → ATK = 100+3; other stats stay 100 if no holdings."""
+    # NVDA @ 150 → 200 shares = 30,000 USD ATK
+    eng.place_order("alice", "NVDA", "BUY", "MARKET", 200)
     s = compute_fighter_stats(eng.portfolio("alice"))
-    # no positions → near base, cash penalty pulls slightly down
-    assert 30 <= s["atk"] <= 55
-    assert 30 <= s["def"] <= 55
-    assert 30 <= s["spd"] <= 55
+    assert s["atk"] == pytest.approx(BASE_STAT + 30_000 / MV_PER_POINT)
+    assert s["atk"] == pytest.approx(103.0)
+    assert s["def"] == pytest.approx(100.0)
+    assert s["spd"] == pytest.approx(100.0)
+    assert "基礎每項 100" in s["tip"]
+
+    # Add JPM DEF: 300 * 100 = 30,000 → DEF +3
+    eng.place_order("alice", "JPM", "BUY", "MARKET", 300)
+    s2 = compute_fighter_stats(eng.portfolio("alice"))
+    assert s2["atk"] == pytest.approx(103.0)
+    assert s2["def"] == pytest.approx(103.0)
+    assert any(b["symbol"] == "NVDA" and b["affinity"] == "atk" for b in s2["breakdown"])
+
+
+def test_cash_only_is_base_100(eng):
+    s = compute_fighter_stats(eng.portfolio("alice"))
+    assert s["atk"] == pytest.approx(100.0)
+    assert s["def"] == pytest.approx(100.0)
+    assert s["spd"] == pytest.approx(100.0)
     assert s["cash_fraction"] > 0.9
 
 
 def test_spd_etf_boosts_speed(eng):
-    # Need a US SPD name in feed — add SPY price via feed
     eng.feed.prices["SPY"] = 500.0
-    eng.place_order("alice", "SPY", "BUY", "MARKET", 100)  # 50k USD
+    eng.place_order("alice", "SPY", "BUY", "MARKET", 40)  # 20k USD SPD
     s = compute_fighter_stats(eng.portfolio("alice"))
+    assert s["spd"] == pytest.approx(102.0)
     assert s["spd"] >= s["atk"]
-    assert s["spd"] > 50
 
 
 def test_ai_stats_mirror():
-    mirror = {"atk": 70, "def": 60, "spd": 55, "dominant": "atk"}
+    mirror = {"atk": 120, "def": 110, "spd": 105, "dominant": "atk"}
     easy = ai_stats("easy", mirror=mirror)
     assert easy["is_ai"] and easy["atk"] < mirror["atk"]
     hard = ai_stats("hard", mirror=mirror)
@@ -93,7 +86,8 @@ def test_fighter_api_auth_and_stats(app):
     assert r.status_code == 200
     body = r.json()
     assert set(body) >= {"atk", "def", "spd", "breakdown", "display_name", "username"}
-    assert 30 <= body["atk"] <= 99
+    assert body["atk"] == pytest.approx(100.0)
+    assert "基礎每項 100" in body["tip"]
     assert c.get("/fighter").status_code == 200
     assert "理財戰士" in c.get("/fighter").text
 
@@ -103,9 +97,9 @@ def test_fighter_match_and_result(app, feed):
     register(c, "alice")
     c2 = client(app)
     assert register(c2, "bob").status_code == 200
-    # give alice ATK holdings, bob DEF
-    assert c.post("/api/me/orders", json={"symbol": "0700.HK", "side": "BUY", "type": "MARKET", "qty": 200}).status_code == 200
-    assert c2.post("/api/me/orders", json={"symbol": "0005.HK", "side": "BUY", "type": "MARKET", "qty": 800}).status_code == 200
+    # alice ATK (NVDA), bob DEF (JPM)
+    assert c.post("/api/me/orders", json={"symbol": "NVDA", "side": "BUY", "type": "MARKET", "qty": 200}).status_code == 200
+    assert c2.post("/api/me/orders", json={"symbol": "JPM", "side": "BUY", "type": "MARKET", "qty": 400}).status_code == 200
 
     bad = c.post("/api/fighter/match", json={"opponent_username": "alice"})
     assert bad.status_code == 400
@@ -150,6 +144,7 @@ def test_fighter_page_has_three_maps(app):
     assert "銀行金庫" in text
     assert 'id="mapPicker"' in text
     assert 'id="mapLabel"' in text
+    assert "基礎每項 100" in text
 
 
 def test_fighter_js_maps_have_height_and_movers():
@@ -165,7 +160,6 @@ def test_fighter_js_maps_have_height_and_movers():
     assert 'kind: "moving"' in src
     assert 'axis: "x"' in src
     assert 'axis: "y"' in src
-    # carry rider on moving platform
     assert "updateMovingPlatforms" in src
     assert "onPlat" in src
     assert "mapPicker" in Path(__file__).resolve().parents[1].joinpath("static/fighter.html").read_text(

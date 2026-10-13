@@ -2,7 +2,7 @@ import pytest
 
 from app.engine import DEFAULT_INITIAL_CASH, Engine, TradingError
 from app.quotes import RANGES, SimFeed
-from app.symbols import lot_size, normalize
+from app.symbols import SymbolError, lot_size, normalize
 
 HKD0 = DEFAULT_INITIAL_CASH["HKD"]
 USD0 = DEFAULT_INITIAL_CASH["USD"]
@@ -17,17 +17,20 @@ def pos(p, sym):
 
 
 # ---------------------------------------------------------------- symbols
-@pytest.mark.parametrize("raw,exp", [("700", "0700.HK"), ("0700", "0700.HK"), ("00700.hk", "0700.HK"),
-                                     ("9988.HK", "9988.HK"), ("aapl", "AAPL"), ("brk.b", "BRK-B")])
+@pytest.mark.parametrize("raw,exp", [("aapl", "AAPL"), ("brk.b", "BRK-B"), ("NVDA", "NVDA"), ("spy", "SPY")])
 def test_normalize(raw, exp):
     assert normalize(raw) == exp
 
 
+@pytest.mark.parametrize("raw", ["700", "0700", "0700.HK", "9988.HK", "00700.hk"])
+def test_normalize_rejects_hk(raw):
+    with pytest.raises(SymbolError, match="港股"):
+        normalize(raw)
+
+
 def test_lot_sizes():
-    assert lot_size("0700.HK") == (100, True)
-    assert lot_size("0005.HK") == (400, True)
     assert lot_size("AAPL") == (1, True)
-    assert lot_size("6666.HK") == (100, False)
+    assert lot_size("NVDA") == (1, True)
 
 
 # ---------------------------------------------------------------- users
@@ -41,7 +44,7 @@ def test_new_user_gets_initial_cash(eng):
 def test_create_user_duplicate_and_invalid(eng):
     assert eng.create_user("bob", "h")["username"] == "bob"
     with pytest.raises(TradingError, match="已經有人用"):
-        eng.create_user("ALICE", "h")          # usernames are case-insensitive
+        eng.create_user("ALICE", "h")
     for bad in ("x", "bad name!", "a" * 21, ""):
         with pytest.raises(TradingError):
             eng.create_user(bad, "h")
@@ -52,36 +55,33 @@ def test_create_user_duplicate_and_invalid(eng):
 
 
 # ---------------------------------------------------------------- market orders
-def test_market_buy_then_sell_hk_no_fees(eng, feed):
-    o = eng.place_order("alice", "700", "BUY", "MARKET", 200)
-    assert o["status"] == "FILLED" and o["fill_price"] == 400.0 and o["symbol"] == "0700.HK"
+def test_market_buy_then_sell_us_no_fees(eng, feed):
+    o = eng.place_order("alice", "AAPL", "BUY", "MARKET", 100)
+    assert o["status"] == "FILLED" and o["fill_price"] == 200.0 and o["symbol"] == "AAPL"
     p = eng.portfolio("alice")
-    assert acct(p, "HKD")["cash"] == HKD0 - 80_000      # no fees
-    assert acct(p, "USD")["cash"] == USD0                   # other wallet untouched
-    x = pos(p, "0700.HK")
-    assert x["qty"] == 200 and x["avg_cost"] == 400.0
+    assert acct(p, "USD")["cash"] == USD0 - 20_000
+    assert acct(p, "HKD")["cash"] == HKD0
+    x = pos(p, "AAPL")
+    assert x["qty"] == 100 and x["avg_cost"] == 200.0
 
-    feed.prices["0700.HK"] = 450.0
+    feed.prices["AAPL"] = 220.0
     p = eng.portfolio("alice")
-    x = pos(p, "0700.HK")
-    assert x["market_value"] == 90_000 and x["unrealized_pnl"] == 10_000 and x["unrealized_pnl_pct"] == 12.5
-    assert acct(p, "HKD")["equity"] == HKD0 + 10_000
+    x = pos(p, "AAPL")
+    assert x["market_value"] == 22_000 and x["unrealized_pnl"] == 2_000
+    assert acct(p, "USD")["equity"] == USD0 + 2_000
 
-    s = eng.place_order("alice", "0700.HK", "SELL", "MARKET", 100)
+    s = eng.place_order("alice", "AAPL", "SELL", "MARKET", 50)
     assert s["status"] == "FILLED"
     p = eng.portfolio("alice")
-    assert acct(p, "HKD")["cash"] == HKD0 - 80_000 + 45_000
-    assert pos(p, "0700.HK")["qty"] == 100
-    assert acct(p, "HKD")["realized_pnl"] == 5_000
-    trades = eng.trades("alice")
-    assert [t["side"] for t in trades] == ["SELL", "BUY"]
-    assert trades[0]["realized_pnl"] == 5_000
+    assert acct(p, "USD")["cash"] == USD0 - 20_000 + 11_000
+    assert pos(p, "AAPL")["qty"] == 50
+    assert acct(p, "USD")["realized_pnl"] == 1_000
 
-    eng.place_order("alice", "0700.HK", "SELL", "MARKET", 100)
+    eng.place_order("alice", "AAPL", "SELL", "MARKET", 50)
     p = eng.portfolio("alice")
-    assert pos(p, "0700.HK") is None
-    assert acct(p, "HKD")["cash"] == HKD0 + 10_000
-    assert acct(p, "HKD")["realized_pnl"] == 10_000
+    assert pos(p, "AAPL") is None
+    assert acct(p, "USD")["cash"] == USD0 + 2_000
+    assert acct(p, "USD")["realized_pnl"] == 2_000
 
 
 def test_round_trip_same_price_returns_exact_cash(eng):
@@ -106,15 +106,14 @@ def test_us_trades_use_usd(eng):
     assert pos(p, "NVDA")["currency"] == "USD"
 
 
+def test_hk_symbols_rejected(eng):
+    with pytest.raises(TradingError, match="港股"):
+        eng.place_order("alice", "0700.HK", "BUY", "MARKET", 100)
+    with pytest.raises(TradingError, match="港股"):
+        eng.place_order("alice", "700", "BUY", "MARKET", 100)
+
+
 # ---------------------------------------------------------------- validation
-def test_board_lot_enforced(eng):
-    with pytest.raises(TradingError, match="每手 100"):
-        eng.place_order("alice", "0700.HK", "BUY", "MARKET", 150)
-    with pytest.raises(TradingError, match="每手 400"):
-        eng.place_order("alice", "0005.HK", "BUY", "MARKET", 100)
-    assert eng.place_order("alice", "0005.HK", "BUY", "MARKET", 800)["status"] == "FILLED"
-
-
 def test_insufficient_cash(eng):
     with pytest.raises(TradingError, match="現金不足"):
         eng.place_order("alice", "TSLA", "BUY", "MARKET", 214)  # 64,200 > USD0
@@ -149,10 +148,9 @@ def test_resting_limit_buy_reserves_then_fills(eng, feed):
     assert o["status"] == "PENDING"
     a = acct(eng.portfolio("alice"), "USD")
     assert a["cash"] == USD0 and a["reserved"] == 18_000 and a["available"] == USD0 - 18_000
-    # reserved cash can't be spent twice
     with pytest.raises(TradingError, match="現金不足"):
         eng.place_order("alice", "AAPL", "BUY", "MARKET", int((USD0 - 18_000) // 200) + 1)
-    assert eng.process_pending() == []                        # price still 200
+    assert eng.process_pending() == []
     feed.prices["AAPL"] = 175.0
     assert eng.process_pending() == [o["id"]]
     filled = eng.get_order(o["id"])
@@ -163,29 +161,29 @@ def test_resting_limit_buy_reserves_then_fills(eng, feed):
 
 
 def test_resting_limit_sell_reserves_shares_and_cancel(eng, feed):
-    eng.place_order("alice", "9988.HK", "BUY", "MARKET", 300)
-    o = eng.place_order("alice", "9988.HK", "SELL", "LIMIT", 200, 150)
+    eng.place_order("alice", "NVDA", "BUY", "MARKET", 300)
+    o = eng.place_order("alice", "NVDA", "SELL", "LIMIT", 200, 160)
     assert o["status"] == "PENDING"
-    x = pos(eng.portfolio("alice"), "9988.HK")
+    x = pos(eng.portfolio("alice"), "NVDA")
     assert x["reserved_qty"] == 200 and x["available_qty"] == 100
     with pytest.raises(TradingError, match="可賣股數不足"):
-        eng.place_order("alice", "9988.HK", "SELL", "MARKET", 200)
+        eng.place_order("alice", "NVDA", "SELL", "MARKET", 200)
     eng.cancel_order("alice", o["id"])
     assert eng.get_order(o["id"])["status"] == "CANCELLED"
-    assert pos(eng.portfolio("alice"), "9988.HK")["available_qty"] == 300
+    assert pos(eng.portfolio("alice"), "NVDA")["available_qty"] == 300
     with pytest.raises(TradingError):
         eng.cancel_order("alice", o["id"])
 
 
 def test_resting_limit_sell_fills(eng, feed):
-    eng.place_order("alice", "9988.HK", "BUY", "MARKET", 300)
-    o = eng.place_order("alice", "9988.HK", "SELL", "LIMIT", 300, 150)
-    feed.prices["9988.HK"] = 151.0
+    eng.place_order("alice", "NVDA", "BUY", "MARKET", 300)
+    o = eng.place_order("alice", "NVDA", "SELL", "LIMIT", 300, 160)
+    feed.prices["NVDA"] = 165.0
     assert eng.process_pending() == [o["id"]]
     p = eng.portfolio("alice")
-    assert pos(p, "9988.HK") is None
-    assert acct(p, "HKD")["cash"] == HKD0 - 39_000 + 45_300
-    assert acct(p, "HKD")["realized_pnl"] == 6_300
+    assert pos(p, "NVDA") is None
+    assert acct(p, "USD")["cash"] == USD0 - 45_000 + 49_500
+    assert acct(p, "USD")["realized_pnl"] == 4_500
 
 
 def test_cancel_buy_releases_cash(eng):
@@ -215,22 +213,22 @@ def test_reset(eng):
     assert acct(p, "USD")["cash"] == USD0 and acct(p, "USD")["reserved"] == 0
 
 
-def test_leaderboard_ranks_by_return_in_hkd(eng, feed):
+def test_leaderboard_ranks_by_return(eng, feed):
     feed.fx = 7.8
     for u in ("bob", "carol"):
         eng.create_user(u, "h")
     eng.place_order("alice", "AAPL", "BUY", "MARKET", 100)    # USD 20,000 in AAPL
-    eng.place_order("bob", "0700.HK", "BUY", "MARKET", 1000)  # HKD 400,000 in Tencent
-    feed.prices["AAPL"] = 220.0     # alice +USD 2,000 = +HKD 15,600
-    feed.prices["0700.HK"] = 380.0  # bob -HKD 20,000
+    eng.place_order("bob", "NVDA", "BUY", "MARKET", 200)      # USD 30,000 in NVDA
+    feed.prices["AAPL"] = 220.0     # alice +USD 2,000
+    feed.prices["NVDA"] = 140.0     # bob -USD 2,000
     lb = eng.leaderboard()
     assert [r["username"] for r in lb["rows"]] == ["alice", "carol", "bob"]
     assert [r["rank"] for r in lb["rows"]] == [1, 2, 3]
     initial = HKD0 + USD0 * 7.8
     a, c, b = lb["rows"]
-    assert a["initial"] == initial and a["equity"] == pytest.approx(initial + 15_600)
-    assert a["return_pct"] == pytest.approx(round(15_600 / initial * 100, 3))
-    assert b["pnl"] == -20_000 and c["return_pct"] == 0
+    assert a["initial"] == initial and a["equity"] == pytest.approx(initial + 2_000 * 7.8)
+    assert a["return_pct"] == pytest.approx(round(2_000 * 7.8 / initial * 100, 3))
+    assert b["pnl"] == pytest.approx(-2_000 * 7.8) and c["return_pct"] == 0
     assert lb["base_currency"] == "HKD" and lb["fx"]["USDHKD"] == 7.8
 
 
@@ -251,8 +249,8 @@ def test_persistence(tmp_path, feed):
 # ---------------------------------------------------------------- simulated feed
 def test_sim_feed_quote_and_all_chart_ranges():
     f = SimFeed()
-    q = f.quote("0700.HK")
-    assert q.source == "simulated" and q.currency == "HKD" and q.price > 0
+    q = f.quote("AAPL")
+    assert q.source == "simulated" and q.currency == "USD" and q.price > 0
     for r in RANGES:
         h = f.history("AAPL", r)
         assert h["source"] == "simulated" and len(h["points"]) > 10

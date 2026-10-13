@@ -91,26 +91,30 @@ def test_lockout_via_api(app):
     assert c.post("/api/auth/login", json={"username": "alice", "password": PW}).status_code == 429
 
 
+def usd(p):
+    return next(a for a in p["accounts"] if a["currency"] == "USD")
+
+
 def test_buy_sell_flow_acts_on_logged_in_user_only(app):
     alice, bob = client(app), client(app)
     register(alice, "alice")
     register(bob, "bob")
-    q = alice.get("/api/quote", params={"symbol": "700"}).json()
-    assert q["symbol"] == "0700.HK" and q["lot_size"] == 100
+    q = alice.get("/api/quote", params={"symbol": "AAPL"}).json()
+    assert q["symbol"] == "AAPL" and q["lot_size"] == 1
 
-    r = alice.post("/api/me/orders", json={"symbol": "0700.HK", "side": "BUY", "type": "MARKET", "qty": 300})
+    r = alice.post("/api/me/orders", json={"symbol": "AAPL", "side": "BUY", "type": "MARKET", "qty": 100})
     assert r.status_code == 200 and r.json()["status"] == "FILLED"
     p = alice.get("/api/me/portfolio").json()
-    assert p["username"] == "alice" and hkd(p)["cash"] == DEFAULT_INITIAL_CASH["HKD"] - 120_000 and p["positions"][0]["qty"] == 300
-    r = alice.post("/api/me/orders", json={"symbol": "0700.HK", "side": "SELL", "type": "MARKET", "qty": 100})
+    assert p["username"] == "alice" and usd(p)["cash"] == DEFAULT_INITIAL_CASH["USD"] - 20_000 and p["positions"][0]["qty"] == 100
+    r = alice.post("/api/me/orders", json={"symbol": "AAPL", "side": "SELL", "type": "MARKET", "qty": 40})
     assert r.json()["status"] == "FILLED"
     p = alice.get("/api/me/portfolio").json()
-    assert hkd(p)["cash"] == DEFAULT_INITIAL_CASH["HKD"] - 80_000 and p["positions"][0]["qty"] == 200
+    assert usd(p)["cash"] == DEFAULT_INITIAL_CASH["USD"] - 20_000 + 8_000 and p["positions"][0]["qty"] == 60
     assert len(alice.get("/api/me/trades").json()) == 2
 
     # bob sees only his own (empty) account and cannot touch alice's orders
     pb = bob.get("/api/me/portfolio").json()
-    assert pb["username"] == "bob" and pb["positions"] == [] and hkd(pb)["cash"] == DEFAULT_INITIAL_CASH["HKD"]
+    assert pb["username"] == "bob" and pb["positions"] == [] and usd(pb)["cash"] == DEFAULT_INITIAL_CASH["USD"]
     assert bob.get("/api/me/orders").json() == [] and bob.get("/api/me/trades").json() == []
     lim = alice.post("/api/me/orders", json={"symbol": "AAPL", "side": "BUY", "type": "LIMIT", "qty": 1,
                                               "limit_price": 1}).json()

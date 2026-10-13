@@ -232,7 +232,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     @app.get("/api/symbols/suggest")
     def symbols_suggest(q: str = Query("", max_length=64), limit: int = Query(10, ge=1, le=25),
                         user=Depends(current_user)):
-        """Autocomplete: match built-in HK/US symbols by code prefix or name."""
+        """Autocomplete: match built-in US symbols by code prefix or name."""
         return {"query": q, "results": suggest_symbols(q, limit)}
 
     @app.get("/api/quote")
