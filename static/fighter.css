@@ -86,6 +86,10 @@
   transform:scale(.94);
   filter:brightness(1.15);
 }
+.virt-btn.action.on-cooldown{
+  opacity:.38;
+  filter:grayscale(.25);
+}
 body.fighter-touch-playing{
   overscroll-behavior:none;
   touch-action:none;

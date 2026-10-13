@@ -457,6 +457,7 @@
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       keys = {};
+      updateAttackButtonCooldown();
     }
 
     function onKey(e, down) {
@@ -497,6 +498,16 @@
       const show = inArena && wantsTouchPad();
       pad.classList.toggle("visible", show);
       document.body.classList.toggle("fighter-touch-playing", show);
+      updateAttackButtonCooldown();
+    }
+
+    function updateAttackButtonCooldown() {
+      const pad = $("#virtPad");
+      if (!pad) return;
+      const cooling = !!(p1 && (p1.atkCool > 0 || p1.atkTimer > 0));
+      pad.querySelectorAll('.virt-btn.action.attack, .virt-btn.action.smash').forEach((btn) => {
+        btn.classList.toggle("on-cooldown", cooling);
+      });
     }
 
     function setHeldKey(code, down) {
@@ -581,16 +592,16 @@
     function tryAttack(f, smash) {
       if (f.hitstun > 0 || f.atkCool > 0 || f.atkTimer > 0) return;
       f.smash = !!smash;
-      // ~60fps: normal attack 1s CD, heavy attack (重攻擊) 5s CD
+      // ~60fps: normal attack 0.5s CD (30f), heavy attack (重攻擊) 5s CD (300f)
       f.atkTimer = smash ? 18 : 12;
-      f.atkCool = smash ? 300 : 60;
+      f.atkCool = smash ? 300 : 30;
     }
 
     function attackBox(f) {
       if (f.atkTimer <= 0) return null;
       const active = f.smash ? f.atkTimer <= 12 && f.atkTimer >= 6 : f.atkTimer <= 8 && f.atkTimer >= 3;
       if (!active) return null;
-      const reach = f.smash ? 52 : 40;
+      const reach = f.smash ? 52 : 80;
       const hx = f.facing > 0 ? f.x + f.w - 4 : f.x - reach + 4;
       return { x: hx, y: f.y + 10, w: reach, h: f.smash ? 36 : 28, smash: f.smash };
     }
@@ -1097,6 +1108,7 @@
         pt.life--;
       }
       particles = particles.filter((p) => p.life > 0);
+      updateAttackButtonCooldown();
       if (checkKO(p1, "p1") || checkKO(p2, "p2")) {
         draw();
         return;
