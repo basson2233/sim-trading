@@ -375,8 +375,8 @@
         invuln: 0,
         smash: false,
         isAI: !!isAI,
-        moveSpd: 3.2 + (spd - 50) * 0.06,
-        airSpd: 3.0 + (spd - 50) * 0.05,
+        moveSpd: (3.2 + (spd - 50) * 0.06) * 0.25,
+        airSpd: (3.0 + (spd - 50) * 0.05) * 0.25,
         jumpV: -11.2 - (spd - 50) * 0.04,
         weight: 1 + (def - 50) * 0.008,
         knockDealt: 0.85 + (atk - 50) * 0.012,
@@ -581,8 +581,9 @@
     function tryAttack(f, smash) {
       if (f.hitstun > 0 || f.atkCool > 0 || f.atkTimer > 0) return;
       f.smash = !!smash;
+      // ~60fps: normal attack 1s CD, heavy attack (重攻擊) 5s CD
       f.atkTimer = smash ? 18 : 12;
-      f.atkCool = smash ? 28 : 18;
+      f.atkCool = smash ? 300 : 60;
     }
 
     function attackBox(f) {
@@ -715,6 +716,51 @@
       } else {
         f.onGround = false;
         f.onPlat = null;
+      }
+    }
+
+
+    function resolveBodyCollision(a, b) {
+      // Solid bodies: fighters cannot overlap / pass through each other
+      const ax2 = a.x + a.w;
+      const ay2 = a.y + a.h;
+      const bx2 = b.x + b.w;
+      const by2 = b.y + b.h;
+      if (a.x >= bx2 || ax2 <= b.x || a.y >= by2 || ay2 <= b.y) return;
+
+      const overlapX = Math.min(ax2, bx2) - Math.max(a.x, b.x);
+      const overlapY = Math.min(ay2, by2) - Math.max(a.y, b.y);
+
+      if (overlapX < overlapY) {
+        const push = overlapX / 2 + 0.01;
+        if (a.x + a.w / 2 < b.x + b.w / 2) {
+          a.x -= push;
+          b.x += push;
+        } else {
+          a.x += push;
+          b.x -= push;
+        }
+        // Cancel velocity pushing into each other so they block
+        if (a.x < b.x) {
+          if (a.vx > 0) a.vx = 0;
+          if (b.vx < 0) b.vx = 0;
+        } else {
+          if (a.vx < 0) a.vx = 0;
+          if (b.vx > 0) b.vx = 0;
+        }
+      } else {
+        const push = overlapY / 2 + 0.01;
+        if (a.y + a.h / 2 < b.y + b.h / 2) {
+          a.y -= push;
+          b.y += push;
+          if (a.vy > 0) a.vy = 0;
+          if (b.vy < 0) b.vy = 0;
+        } else {
+          a.y += push;
+          b.y -= push;
+          if (b.vy > 0) b.vy = 0;
+          if (a.vy < 0) a.vy = 0;
+        }
       }
     }
 
@@ -1042,6 +1088,7 @@
       controlAI();
       physics(p1);
       physics(p2);
+      resolveBodyCollision(p1, p2);
       hit(p1, p2);
       hit(p2, p1);
       for (const pt of particles) {

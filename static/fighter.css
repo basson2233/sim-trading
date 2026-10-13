@@ -81,7 +81,7 @@
 .virt-btn.move.down{width:52px;height:52px;font-size:14px;opacity:.92}
 .virt-btn.action.jump{background:rgba(59,130,246,.72);border-color:rgba(147,197,253,.55)}
 .virt-btn.action.attack{background:rgba(234,57,67,.72);border-color:rgba(252,165,165,.55);width:72px;height:72px}
-.virt-btn.action.smash{background:rgba(245,158,11,.72);border-color:rgba(253,230,138,.55);width:60px;height:60px;font-size:13px}
+.virt-btn.action.smash{background:rgba(245,158,11,.72);border-color:rgba(253,230,138,.55);width:72px;height:60px;border-radius:18px;font-size:12px;letter-spacing:.02em}
 .virt-btn:active,.virt-btn.pressed{
   transform:scale(.94);
   filter:brightness(1.15);
