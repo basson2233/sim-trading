@@ -4,7 +4,6 @@ from app.engine import DEFAULT_INITIAL_CASH, Engine, TradingError
 from app.quotes import RANGES, SimFeed
 from app.symbols import SymbolError, lot_size, normalize
 
-HKD0 = DEFAULT_INITIAL_CASH["HKD"]
 USD0 = DEFAULT_INITIAL_CASH["USD"]
 
 
@@ -36,9 +35,11 @@ def test_lot_sizes():
 # ---------------------------------------------------------------- users
 def test_new_user_gets_initial_cash(eng):
     p = eng.portfolio("alice")
-    assert acct(p, "HKD")["cash"] == HKD0 and acct(p, "USD")["cash"] == USD0
+    assert [a["currency"] for a in p["accounts"]] == ["USD"]
+    assert acct(p, "USD")["cash"] == USD0 == 1_000_000.0
     assert p["positions"] == []
     assert p["total"]["return_pct"] == 0
+    assert p["base_currency"] == "USD"
 
 
 def test_create_user_duplicate_and_invalid(eng):
@@ -60,7 +61,7 @@ def test_market_buy_then_sell_us_no_fees(eng, feed):
     assert o["status"] == "FILLED" and o["fill_price"] == 200.0 and o["symbol"] == "AAPL"
     p = eng.portfolio("alice")
     assert acct(p, "USD")["cash"] == USD0 - 20_000
-    assert acct(p, "HKD")["cash"] == HKD0
+    assert len(p["accounts"]) == 1
     x = pos(p, "AAPL")
     assert x["qty"] == 100 and x["avg_cost"] == 200.0
 
@@ -102,7 +103,7 @@ def test_average_cost(eng, feed):
 def test_us_trades_use_usd(eng):
     eng.place_order("alice", "NVDA", "BUY", "MARKET", 100)
     p = eng.portfolio("alice")
-    assert acct(p, "USD")["cash"] == USD0 - 15_000 and acct(p, "HKD")["cash"] == HKD0
+    assert acct(p, "USD")["cash"] == USD0 - 15_000
     assert pos(p, "NVDA")["currency"] == "USD"
 
 
@@ -115,9 +116,10 @@ def test_hk_symbols_rejected(eng):
 
 # ---------------------------------------------------------------- validation
 def test_insufficient_cash(eng):
+    # TSLA @ 300; 1_000_000 / 300 ≈ 3333.33
     with pytest.raises(TradingError, match="現金不足"):
-        eng.place_order("alice", "TSLA", "BUY", "MARKET", 214)  # 64,200 > USD0
-    assert eng.place_order("alice", "TSLA", "BUY", "MARKET", 213)["status"] == "FILLED"
+        eng.place_order("alice", "TSLA", "BUY", "MARKET", 3334)
+    assert eng.place_order("alice", "TSLA", "BUY", "MARKET", 3333)["status"] == "FILLED"
 
 
 def test_insufficient_shares(eng):
@@ -214,7 +216,6 @@ def test_reset(eng):
 
 
 def test_leaderboard_ranks_by_return(eng, feed):
-    feed.fx = 7.8
     for u in ("bob", "carol"):
         eng.create_user(u, "h")
     eng.place_order("alice", "AAPL", "BUY", "MARKET", 100)    # USD 20,000 in AAPL
@@ -224,17 +225,74 @@ def test_leaderboard_ranks_by_return(eng, feed):
     lb = eng.leaderboard()
     assert [r["username"] for r in lb["rows"]] == ["alice", "carol", "bob"]
     assert [r["rank"] for r in lb["rows"]] == [1, 2, 3]
-    initial = HKD0 + USD0 * 7.8
     a, c, b = lb["rows"]
-    assert a["initial"] == initial and a["equity"] == pytest.approx(initial + 2_000 * 7.8)
-    assert a["return_pct"] == pytest.approx(round(2_000 * 7.8 / initial * 100, 3))
-    assert b["pnl"] == pytest.approx(-2_000 * 7.8) and c["return_pct"] == 0
-    assert lb["base_currency"] == "HKD" and lb["fx"]["USDHKD"] == 7.8
+    assert a["initial"] == USD0 and a["equity"] == pytest.approx(USD0 + 2_000)
+    assert a["return_pct"] == pytest.approx(round(2_000 / USD0 * 100, 3))
+    assert b["pnl"] == pytest.approx(-2_000) and c["return_pct"] == 0
+    assert lb["base_currency"] == "USD"
 
 
 def test_fx_change_does_not_change_return(eng, feed):
     feed.fx = 7.75
     assert eng.portfolio("alice")["total"]["return_pct"] == 0
+
+
+def test_migrate_usd_only_capital_resets_everyone(tmp_path, feed):
+    import sqlite3
+    db = str(tmp_path / "legacy.db")
+    con = sqlite3.connect(db)
+    con.executescript("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT,
+            email TEXT,
+            email_verified INTEGER NOT NULL DEFAULT 0,
+            google_sub TEXT,
+            failed_logins INTEGER NOT NULL DEFAULT 0,
+            locked_until REAL NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            reset_at REAL NOT NULL
+        );
+        CREATE TABLE cash (
+            user_id INTEGER NOT NULL, currency TEXT NOT NULL, initial REAL NOT NULL,
+            balance REAL NOT NULL, reserved REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, currency)
+        );
+        CREATE TABLE positions (
+            user_id INTEGER NOT NULL, symbol TEXT NOT NULL, name TEXT, currency TEXT NOT NULL,
+            qty INTEGER NOT NULL, avg_cost REAL NOT NULL, reserved_qty INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, symbol)
+        );
+        CREATE TABLE orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, symbol TEXT NOT NULL,
+            name TEXT, currency TEXT NOT NULL, side TEXT NOT NULL, type TEXT NOT NULL,
+            qty INTEGER NOT NULL, limit_price REAL, status TEXT NOT NULL,
+            reserved_amount REAL NOT NULL DEFAULT 0, fill_price REAL,
+            created_at REAL NOT NULL, updated_at REAL NOT NULL, price_source TEXT
+        );
+        CREATE TABLE trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, order_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL, name TEXT, currency TEXT NOT NULL, side TEXT NOT NULL,
+            qty INTEGER NOT NULL, price REAL NOT NULL, amount REAL NOT NULL,
+            realized_pnl REAL, executed_at REAL NOT NULL, price_source TEXT
+        );
+        INSERT INTO users(username, password_hash, created_at, reset_at)
+            VALUES ('alice', 'h', 1, 1);
+        INSERT INTO cash VALUES (1, 'HKD', 500000, 500000, 0);
+        INSERT INTO cash VALUES (1, 'USD', 64000, 50000, 0);
+        INSERT INTO positions VALUES (1, 'AAPL', 'Apple', 'USD', 10, 200, 0);
+    """)
+    con.commit(); con.close()
+    e = Engine(db, feed)
+    p = e.portfolio("alice")
+    assert [a["currency"] for a in p["accounts"]] == ["USD"]
+    assert acct(p, "USD")["cash"] == USD0 and acct(p, "USD")["initial"] == USD0
+    assert p["positions"] == [] and e.orders("alice") == [] and e.trades("alice") == []
+    # second open does not wipe a traded account that already has USD 1M initial
+    e.place_order("alice", "AAPL", "BUY", "MARKET", 5)
+    e2 = Engine(db, feed)
+    assert pos(e2.portfolio("alice"), "AAPL")["qty"] == 5
 
 
 def test_persistence(tmp_path, feed):

@@ -209,20 +209,21 @@ async function submitOrder(ev) {
 
 // ---------------------------------------------------------------- account
 function renderSummary(p) {
-  const t = p.total, fx = p.fx.USDHKD;
-  const acctCard = (a) => `<div class="card"><h4>${a.currency === "HKD" ? "港元帳戶（港股）" : "美元帳戶（美股）"}</h4>
-    <div class="big">${a.currency} ${fmt(a.equity)}</div>
+  const t = p.total;
+  const usdAccounts = (p.accounts || []).filter((a) => a.currency === "USD");
+  const acctCard = (a) => `<div class="card"><h4>美元帳戶（美股）</h4>
+    <div class="big">USD ${fmt(a.equity)}</div>
     <div class="kv"><span>現金</span><span>${fmt(a.cash)}</span><span>可用現金</span><span>${fmt(a.available)}</span>
     <span>持倉市值</span><span>${fmt(a.market_value)}</span>
     <span>未實現盈虧</span><span class="${cls(a.unrealized_pnl)}">${sign(a.unrealized_pnl)}${fmt(a.unrealized_pnl)}</span>
     <span>已實現盈虧</span><span class="${cls(a.realized_pnl)}">${sign(a.realized_pnl)}${fmt(a.realized_pnl)}</span>
     <span>回報率</span><span class="${cls(a.return_pct)}">${pct(a.return_pct)}</span></div></div>`;
-  $("#summaryCards").innerHTML = `<div class="card"><h4>總資產（折合港元）</h4>
-    <div class="big">HKD ${fmt(t.equity)}</div>
+  $("#summaryCards").innerHTML = `<div class="card"><h4>總資產（美元）</h4>
+    <div class="big">USD ${fmt(t.equity)}</div>
     <div class="kv"><span>總盈虧</span><span class="${cls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</span>
     <span>總回報率</span><span class="${cls(t.return_pct)}">${pct(t.return_pct)}</span>
-    <span>初始資金</span><span>${fmt(t.initial)}</span><span>匯率 USD/HKD</span><span>${fmt(fx, 4)}</span></div></div>` +
-    p.accounts.map(acctCard).join("");
+    <span>初始資金</span><span>USD ${fmt(t.initial)}</span></div></div>` +
+    usdAccounts.map(acctCard).join("");
 }
 function renderPositions(p) {
   const rows = p.positions.map((x) => `<tr>
@@ -278,12 +279,12 @@ async function refreshAccount() {
 async function loadLeaderboard() {
   try {
     const lb = await api("/api/leaderboard");
-    $("#lbNote").textContent = `以港元為基準貨幣計算：美元資產按 USD/HKD ${fmt(lb.fx.USDHKD, 4)} 折算（初始資金亦用同一匯率折算，所以匯率變動唔會影響回報率）。更新時間：${tHK(lb.as_of)} HKT`;
+    $("#lbNote").textContent = `以美元為基準貨幣計算總資產同回報率。更新時間：${tHK(lb.as_of)} HKT`;
     const rows = lb.rows.map((r) => `<tr class="rank${r.rank} ${r.username === state.user ? "me" : ""}">
       <td class="l">${r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</td><td class="l">${esc(r.username)}${r.username === state.user ? "（你）" : ""}</td>
-      <td class="${cls(r.return_pct)}"><b>${sign(r.return_pct)}${fmt(r.return_pct, 3)}%</b></td><td>HKD ${fmt(r.equity)}</td>
+      <td class="${cls(r.return_pct)}"><b>${sign(r.return_pct)}${fmt(r.return_pct, 3)}%</b></td><td>USD ${fmt(r.equity)}</td>
       <td class="${cls(r.pnl)}">${sign(r.pnl)}${fmt(r.pnl)}</td><td>${r.positions}</td><td>${r.trades}</td></tr>`).join("");
-    $("#lbTable").innerHTML = `<tr><th class="l">排名</th><th class="l">用戶</th><th>總回報率</th><th>總資產（折合港元）</th><th>總盈虧 (HKD)</th><th>持倉數</th><th>成交次數</th></tr>` +
+    $("#lbTable").innerHTML = `<tr><th class="l">排名</th><th class="l">用戶</th><th>總回報率</th><th>總資產（美元）</th><th>總盈虧 (USD)</th><th>持倉數</th><th>成交次數</th></tr>` +
       (rows || `<tr><td colspan="7" class="empty">暫時未有用戶</td></tr>`);
   } catch (e) { toast(e.message); }
 }

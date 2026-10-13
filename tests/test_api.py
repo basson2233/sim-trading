@@ -22,10 +22,6 @@ def register(c, name, pw=PW, email=None):
                                               "email": email or f"{name}@example.com"})
 
 
-def hkd(p):
-    return next(a for a in p["accounts"] if a["currency"] == "HKD")
-
-
 def test_everything_requires_auth(app):
     c = client(app)
     for path in ["/api/me/portfolio", "/api/me/orders", "/api/me/trades", "/api/leaderboard",

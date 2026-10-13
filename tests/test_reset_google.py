@@ -269,7 +269,7 @@ def test_google_creates_new_user(feed, tmp_path):
     assert me["username"] == "newperson2" and me["email"] == "new.person@example.com"
     assert me["has_password"] is False and me["google"] is True and me["email_verified"] is True
     p = c.get("/api/me/portfolio").json()
-    assert next(a for a in p["accounts"] if a["currency"] == "HKD")["cash"] == DEFAULT_INITIAL_CASH["HKD"]
+    assert [a["currency"] for a in p["accounts"]] == ["USD"]
     assert next(a for a in p["accounts"] if a["currency"] == "USD")["cash"] == DEFAULT_INITIAL_CASH["USD"]
     # signing in again with the same sub logs into the same account (no second user)
     c.post("/api/auth/logout")

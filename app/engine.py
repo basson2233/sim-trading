@@ -1,11 +1,9 @@
 """Paper-trading engine: users, cash, positions, orders, trades, leaderboard.
 
 Design
-- Trading is US stocks only (USD wallet). Legacy HKD cash wallets may still exist for older accounts.
-  New trades use USD only; HK symbols are rejected at normalize / place_order.
-- For the leaderboard / combined totals only, USD is converted to HKD (base currency)
-  at the current USD/HKD rate. The *initial* capital is converted at the same rate, so
-  FX moves do not change anyone's return %; ranking reflects trading performance only.
+- Trading is US stocks only (USD wallet). HK symbols are rejected at normalize / place_order.
+- Starting capital is USD 1,000,000 for every account (no HKD wallet).
+- Leaderboard / combined totals use USD as the base currency.
 - No trading fees (by request).
 - Market orders fill immediately at the current quote. Limit orders fill immediately if
   marketable, otherwise rest as PENDING with cash (buy) or shares (sell) reserved, and are
@@ -21,9 +19,10 @@ from datetime import datetime, timedelta, timezone
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 
 HKT = timezone(timedelta(hours=8))
-# New accounts / reset: HKD 500,000 + USD 64,000 ≈ HKD 999,200 at USD/HKD 7.8 (~1M HKD total).
-DEFAULT_INITIAL_CASH = {"HKD": 500_000.0, "USD": 64_000.0}
-BASE_CURRENCY = "HKD"
+# New accounts / reset: USD 1,000,000 only (US stocks).
+DEFAULT_INITIAL_CASH = {"USD": 1_000_000.0}
+BASE_CURRENCY = "USD"
+_LEGACY_USD_INITIAL = 64_000.0  # previous starting USD (triggers one-shot capital migration)
 
 
 class TradingError(ValueError):
@@ -191,6 +190,7 @@ class Engine:
         self.db.execute("PRAGMA journal_mode=WAL")
         self._migrate_pre_schema()
         self.db.executescript(SCHEMA)
+        self._migrate_usd_only_capital()
 
     def _migrate_pre_schema(self):
         """v1 databases had a users table without auth columns: add them (legacy rows get NULL hash)."""
@@ -208,6 +208,41 @@ class Engine:
         for col, ddl in adds:
             if col not in cols:
                 self.db.execute(ddl)
+
+    def _migrate_usd_only_capital(self):
+        """One-shot: drop HKD wallets, set everyone to USD 1M starting capital, clear trades."""
+        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "cash" not in tables or "users" not in tables:
+            return
+        usd_amt = float(self.initial_cash.get("USD", 1_000_000.0))
+        need = bool(self.db.execute("SELECT 1 FROM cash WHERE currency = 'HKD' LIMIT 1").fetchone())
+        need = need or bool(self.db.execute(
+            "SELECT 1 FROM cash WHERE currency = 'USD' AND initial = ? LIMIT 1",
+            (_LEGACY_USD_INITIAL,)).fetchone())
+        if not need:
+            for u in self.db.execute("SELECT id FROM users").fetchall():
+                rows = self.db.execute(
+                    "SELECT currency, initial FROM cash WHERE user_id = ?", (u["id"],)).fetchall()
+                ccys = {r["currency"] for r in rows}
+                if ccys != set(self.initial_cash) or any(
+                        r["currency"] == "USD" and float(r["initial"]) != usd_amt for r in rows):
+                    need = True
+                    break
+        if not need:
+            return
+        with self._tx() as db:
+            db.execute("DELETE FROM positions")
+            db.execute("DELETE FROM orders")
+            db.execute("DELETE FROM trades")
+            db.execute("DELETE FROM cash")
+            now = _now()
+            for u in db.execute("SELECT id FROM users").fetchall():
+                for ccy, amt in self.initial_cash.items():
+                    db.execute(
+                        "INSERT INTO cash(user_id, currency, initial, balance, reserved) "
+                        "VALUES (?,?,?,?,0)",
+                        (u["id"], ccy, amt, amt))
+                db.execute("UPDATE users SET reset_at = ? WHERE id = ?", (now, u["id"]))
 
     # ------------------------------------------------------------------ helpers
     def _tx(self):
@@ -508,11 +543,12 @@ class Engine:
     def portfolio(self, username, fx=None, quote_cache=None):
         u = self._user(username)
         fx = fx or self._fx()
-        to_base = {"HKD": 1.0, "USD": fx}
+        # Base currency is USD; keep HKD→USD for any leftover legacy cash rows.
+        to_base = {"USD": 1.0, "HKD": (1.0 / fx) if fx else (1.0 / 7.8)}
         quote_cache = quote_cache if quote_cache is not None else {}
         positions = []
-        mv_by_ccy = {c: 0.0 for c in self.initial_cash}
-        upnl_by_ccy = {c: 0.0 for c in self.initial_cash}
+        mv_by_ccy = {c: 0.0 for c in ("USD", "HKD")}
+        upnl_by_ccy = {c: 0.0 for c in ("USD", "HKD")}
         for p in self.db.execute("SELECT * FROM positions WHERE user_id=? ORDER BY currency, symbol", (u["id"],)):
             sym = p["symbol"]
             if sym not in quote_cache:
@@ -550,8 +586,9 @@ class Engine:
                 "realized_pnl": _r2(realized.get(ccy, 0.0)),
                 "return_pct": round((equity / c["initial"] - 1) * 100, 3) if c["initial"] else 0.0,
             })
-            tot_equity += equity * to_base[ccy]
-            tot_initial += c["initial"] * to_base[ccy]
+            rate = to_base.get(ccy, 1.0)
+            tot_equity += equity * rate
+            tot_initial += c["initial"] * rate
         return {
             "username": u["username"],
             "base_currency": BASE_CURRENCY,
