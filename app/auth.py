@@ -70,7 +70,7 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-# A fixed dummy hash so unknown usernames cost the same time as wrong passwords.
+# A fixed dummy hash so unknown emails cost the same time as wrong passwords.
 _DUMMY_HASH = hash_password(secrets.token_hex(8))
 
 
@@ -145,12 +145,12 @@ class AuthService:
         self.ip_register.hit(ip)
         return user
 
-    def authenticate(self, username, password, ip="?"):
+    def authenticate(self, email, password, ip="?"):
         if self.ip_fail.blocked(ip):
             raise RateLimited("登入失敗次數太多，請 15 分鐘後再試")
-        username = (username or "").strip()
+        email = (email or "").strip().lower()
         password = password or ""
-        row = self.db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        row = self.db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone() if email else None
         now = time.time()
         if row and row["locked_until"] > now:
             mins = int((row["locked_until"] - now) // 60) + 1
@@ -168,7 +168,7 @@ class AuthService:
                                         (now + LOCKOUT_SECONDS, row["id"]))
                         raise RateLimited("密碼錯誤太多次，帳戶已暫時鎖定 15 分鐘")
                     self.db.execute("UPDATE users SET failed_logins=? WHERE id=?", (failed, row["id"]))
-            raise AuthError("用戶名或密碼錯誤")
+            raise AuthError("電郵或密碼錯誤")
         if row["failed_logins"] or row["locked_until"]:
             self.db.execute("UPDATE users SET failed_logins=0, locked_until=0 WHERE id=?", (row["id"],))
         return {"id": row["id"], "username": row["username"]}

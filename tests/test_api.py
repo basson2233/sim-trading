@@ -69,9 +69,9 @@ def test_login_logout_and_token_reuse(app):
     register(c, "alice")
     c.post("/api/auth/logout")
     assert c.get("/api/me/portfolio").status_code == 401
-    assert c.post("/api/auth/login", json={"username": "alice", "password": "wrong-pass"}).status_code == 401
-    assert c.post("/api/auth/login", json={"username": "ghost", "password": PW}).status_code == 401
-    r = c.post("/api/auth/login", json={"username": "alice", "password": PW})
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": "wrong-pass"}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "ghost@example.com", "password": PW}).status_code == 401
+    r = c.post("/api/auth/login", json={"email": "alice@example.com", "password": PW})
     assert r.status_code == 200
     token = c.cookies.get(COOKIE)
     assert c.get("/api/me/portfolio").status_code == 200
@@ -85,10 +85,10 @@ def test_lockout_via_api(app):
     c = client(app)
     register(c, "alice")
     c.post("/api/auth/logout")
-    codes = [c.post("/api/auth/login", json={"username": "alice", "password": "wrong-pass"}).status_code
+    codes = [c.post("/api/auth/login", json={"email": "alice@example.com", "password": "wrong-pass"}).status_code
              for _ in range(6)]
     assert codes == [401, 401, 401, 401, 429, 429]
-    assert c.post("/api/auth/login", json={"username": "alice", "password": PW}).status_code == 429
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": PW}).status_code == 429
 
 
 def usd(p):
@@ -137,7 +137,7 @@ def test_buy_sell_flow_acts_on_logged_in_user_only(app):
 def test_change_password_api(app):
     c, other = client(app), client(app)
     register(c, "alice")
-    other.post("/api/auth/login", json={"username": "alice", "password": PW})
+    other.post("/api/auth/login", json={"email": "alice@example.com", "password": PW})
     body = {"current_password": "wrong-pass", "new_password": "brand-new-pw", "new_password_confirm": "brand-new-pw"}
     assert c.post("/api/auth/change-password", json=body).status_code == 400
     body["current_password"] = PW
@@ -145,8 +145,8 @@ def test_change_password_api(app):
     assert c.get("/api/me/portfolio").status_code == 200                  # current session kept
     assert other.get("/api/me/portfolio").status_code == 401              # other sessions revoked
     c.post("/api/auth/logout")
-    assert c.post("/api/auth/login", json={"username": "alice", "password": PW}).status_code == 401
-    assert c.post("/api/auth/login", json={"username": "alice", "password": "brand-new-pw"}).status_code == 200
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": PW}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": "brand-new-pw"}).status_code == 200
 
 
 def test_cross_origin_write_rejected(app):

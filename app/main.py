@@ -154,7 +154,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         email: str
 
     class LoginIn(BaseModel):
-        username: str
+        email: str
         password: str
 
     class ChangePwIn(BaseModel):
@@ -179,7 +179,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
 
     @app.post("/api/auth/login")
     def login(body: LoginIn, request: Request, response: Response):
-        user = guard(auth.authenticate, body.username, body.password, ip=client_ip(request))
+        user = guard(auth.authenticate, body.email, body.password, ip=client_ip(request))
         old = request.cookies.get(COOKIE)
         if old:
             auth.delete_session(old)  # rotate session on login

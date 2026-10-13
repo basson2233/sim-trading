@@ -91,7 +91,7 @@ def test_reset_single_use_expiry_kills_sessions_and_email_unique(feed, tmp_path)
     c = client(app)
     other = client(app)
     register(c)
-    other.post("/api/auth/login", json={"username": "alice", "password": PW})
+    other.post("/api/auth/login", json={"email": "alice@example.com", "password": PW})
     assert c.get("/api/me/portfolio").status_code == 200
     url = c.post("/api/auth/forgot", json={"email": "alice@example.com"}).json()["reset_url"]
     token = parse_qs(urlparse(url).query)["token"][0]
@@ -112,8 +112,8 @@ def test_reset_single_use_expiry_kills_sessions_and_email_unique(feed, tmp_path)
     # every existing session is dead; old password fails; new one works
     assert c.get("/api/me/portfolio").status_code == 401
     assert other.get("/api/me/portfolio").status_code == 401
-    assert c.post("/api/auth/login", json={"username": "alice", "password": PW}).status_code == 401
-    assert c.post("/api/auth/login", json={"username": "alice", "password": "brand-new-pw"}).status_code == 200
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": PW}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "alice@example.com", "password": "brand-new-pw"}).status_code == 200
 
     # expiry
     url2 = c.post("/api/auth/forgot", json={"email": "alice@example.com"}).json()["reset_url"]
@@ -249,7 +249,7 @@ def test_google_links_verified_email_and_rejects_unverified(feed, tmp_path):
     denied = c3.get("/auth/google/callback", params={"code": "x", "state": st})
     assert denied.status_code == 400 and "未驗證" in denied.json()["detail"]
     # alice is unchanged: still no google link, password login still works
-    assert c3.post("/api/auth/login", json={"username": "alice", "password": PW}).status_code == 200
+    assert c3.post("/api/auth/login", json={"email": "alice@example.com", "password": PW}).status_code == 200
     assert c3.get("/api/auth/me").json()["google"] is False
 
 

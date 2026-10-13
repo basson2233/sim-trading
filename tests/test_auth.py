@@ -45,45 +45,46 @@ def test_register_validation(auth):
 
 def test_authenticate(auth):
     auth.register("alice", PW, PW, "alice@example.com")
-    assert auth.authenticate("alice", PW)["username"] == "alice"
-    with pytest.raises(AuthError, match="用戶名或密碼錯誤"):
-        auth.authenticate("alice", "wrong-password")
-    with pytest.raises(AuthError, match="用戶名或密碼錯誤"):   # same message for unknown users
-        auth.authenticate("nobody", PW)
+    assert auth.authenticate("alice@example.com", PW)["username"] == "alice"
+    assert auth.authenticate("Alice@Example.com", PW)["username"] == "alice"  # case-insensitive
+    with pytest.raises(AuthError, match="電郵或密碼錯誤"):
+        auth.authenticate("alice@example.com", "wrong-password")
+    with pytest.raises(AuthError, match="電郵或密碼錯誤"):   # same message for unknown users
+        auth.authenticate("nobody@example.com", PW)
 
 
 def test_account_lockout_after_5_failures(auth):
     auth.register("alice", PW, PW, "alice@example.com")
     for _ in range(4):
         with pytest.raises(AuthError):
-            auth.authenticate("alice", "nope-nope", ip="1.1.1.1")
+            auth.authenticate("alice@example.com", "nope-nope", ip="1.1.1.1")
     with pytest.raises(RateLimited):
-        auth.authenticate("alice", "nope-nope", ip="1.1.1.1")
+        auth.authenticate("alice@example.com", "nope-nope", ip="1.1.1.1")
     with pytest.raises(RateLimited):                       # even the right password is refused while locked
-        auth.authenticate("alice", PW, ip="2.2.2.2")
+        auth.authenticate("alice@example.com", PW, ip="2.2.2.2")
     auth.db.execute("UPDATE users SET locked_until=? WHERE username='alice'", (time.time() - 1,))
-    assert auth.authenticate("alice", PW, ip="2.2.2.2")["username"] == "alice"
+    assert auth.authenticate("alice@example.com", PW, ip="2.2.2.2")["username"] == "alice"
 
 
 def test_successful_login_resets_failure_counter(auth):
     auth.register("alice", PW, PW, "alice@example.com")
     for _ in range(4):
         with pytest.raises(AuthError):
-            auth.authenticate("alice", "nope-nope")
-    auth.authenticate("alice", PW)
+            auth.authenticate("alice@example.com", "nope-nope")
+    auth.authenticate("alice@example.com", PW)
     for _ in range(4):
         with pytest.raises(AuthError):
-            auth.authenticate("alice", "nope-nope")      # not locked: counter was reset
+            auth.authenticate("alice@example.com", "nope-nope")      # not locked: counter was reset
 
 
 def test_ip_throttle(auth):
     for i in range(20):
         with pytest.raises(AuthError):
-            auth.authenticate(f"ghost{i}", "whatever1", ip="9.9.9.9")
+            auth.authenticate(f"ghost{i}@example.com", "whatever1", ip="9.9.9.9")
     with pytest.raises(RateLimited):
-        auth.authenticate("ghost", "whatever1", ip="9.9.9.9")
+        auth.authenticate("ghost@example.com", "whatever1", ip="9.9.9.9")
     auth.register("alice", PW, PW, "alice@example.com")
-    assert auth.authenticate("alice", PW, ip="8.8.8.8")    # other IPs unaffected
+    assert auth.authenticate("alice@example.com", PW, ip="8.8.8.8")    # other IPs unaffected
 
 
 def test_sessions(auth):
@@ -111,8 +112,8 @@ def test_change_password(auth):
     auth.change_password(uid, PW, "new-password-1", "new-password-1", keep_token=keep)
     assert auth.session_user(keep) and auth.session_user(other) is None
     with pytest.raises(AuthError):
-        auth.authenticate("alice", PW)
-    assert auth.authenticate("alice", "new-password-1")
+        auth.authenticate("alice@example.com", PW)
+    assert auth.authenticate("alice@example.com", "new-password-1")
 
 
 def test_migration_removes_legacy_passwordless_users(tmp_path, feed):

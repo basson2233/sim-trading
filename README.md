@@ -125,7 +125,7 @@ run.sh         一條命令啟動
 | Method | Path | 說明 |
 |---|---|---|
 | POST | `/api/auth/register` `{username, email, password, password_confirm}` | 註冊並登入（設 cookie） |
-| POST | `/api/auth/login` `{username, password}` | 登入（設 cookie） |
+| POST | `/api/auth/login` `{email, password}` | 登入（設 cookie） |
 | POST | `/api/auth/logout` | 登出 |
 | GET | `/api/auth/me` | 目前用戶（含電郵、有冇密碼、有冇連結 Google）🔒 |
 | GET | `/api/auth/providers` | `{google: true/false}`，登入頁用嚟決定顯示唔顯示 Google 按鈕 |

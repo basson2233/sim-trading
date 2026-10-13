@@ -17,7 +17,7 @@
   </div>
 
   <form id="loginForm" class="order-form" autocomplete="on">
-    <label>用戶名<input id="lUser" name="username" autocomplete="username" required maxlength="20"></label>
+    <label>電郵<input id="lEmail" name="email" type="email" autocomplete="email" required maxlength="254"></label>
     <label>密碼<input id="lPass" name="password" type="password" autocomplete="current-password" required></label>
     <button class="btn primary big">登入</button>
     <a id="googleBtn" class="btn ghost big google-btn hidden" href="/auth/google/start">用 Google 登入</a>
@@ -48,7 +48,7 @@ $("#registerForm").classList.toggle("hidden", !isReg);
 $("#tabLogin").classList.toggle("on", !isReg);
 $("#tabRegister").classList.toggle("on", isReg);
 document.title = (isReg ? "註冊" : "登入") + "・模擬股票交易平台";
-(isReg ? $("#rUser") : $("#lUser")).focus();
+(isReg ? $("#rUser") : $("#lEmail")).focus();
 
 async function post(url, body, msgEl, btn) {
   msgEl.className = "msg"; msgEl.textContent = ""; btn.disabled = true;
@@ -62,7 +62,7 @@ async function post(url, body, msgEl, btn) {
 }
 $("#loginForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  post("/api/auth/login", {username: $("#lUser").value.trim(), password: $("#lPass").value}, $("#loginMsg"), e.submitter);
+  post("/api/auth/login", {email: $("#lEmail").value.trim(), password: $("#lPass").value}, $("#loginMsg"), e.submitter);
 });
 $("#registerForm").addEventListener("submit", (e) => {
   e.preventDefault();
