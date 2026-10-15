@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261015c";
+  const ASSET_VER = "20261015d";
   const CHARACTERS = [
     {
       id: "herta",
@@ -401,8 +401,10 @@
       H = 540;
 
     // 大黑塔 action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261015c";
+    const ASSET_VER = "20261015d";
     const SPRITE_KEYS = ["idle", "walk", "attack", "heavy", "jump", "hurt"];
+    const WALK_FRAMES = 6;
+    const WALK_FRAME_TICKS = 7; // ~8.5 fps at 60Hz
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
     let spritesFailed = 0;
@@ -1234,8 +1236,21 @@
       const drawH = 118;
       let drawW = drawH;
       const ok = !!(img && img.complete && img.naturalWidth > 0);
+      const isWalkStrip = key === "walk" && ok && img.naturalWidth >= img.naturalHeight * 2;
+      let srcX = 0,
+        srcY = 0,
+        srcW = 0,
+        srcH = 0;
       if (ok) {
-        drawW = (img.naturalWidth / img.naturalHeight) * drawH;
+        if (isWalkStrip) {
+          srcW = img.naturalWidth / WALK_FRAMES;
+          srcH = img.naturalHeight;
+          srcX = (Math.floor(tick / WALK_FRAME_TICKS) % WALK_FRAMES) * srcW;
+          srcY = 0;
+          drawW = (srcW / srcH) * drawH;
+        } else {
+          drawW = (img.naturalWidth / img.naturalHeight) * drawH;
+        }
       }
 
       // Soft ground shadow so fighters read clearly on platforms
@@ -1250,7 +1265,11 @@
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
-        ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
+        if (isWalkStrip) {
+          ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, -drawH, drawW, drawH);
+        } else {
+          ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
+        }
         ctx.restore();
       } else {
         // brief fallback while loading / if asset missing — kick another preload
