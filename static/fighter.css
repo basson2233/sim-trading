@@ -28,7 +28,7 @@
 .hud-mini{font-size:11px;color:var(--muted);margin-top:4px}
 .hud-center{text-align:center}
 .round-msg{font-weight:700;font-size:18px;margin-bottom:6px;min-height:24px}
-#game{width:100%;max-width:960px;height:auto;display:block;margin:0 auto;background:#0a1628;border:1px solid var(--line);border-radius:12px;image-rendering:pixelated}
+#game{width:100%;max-width:960px;height:auto;display:block;margin:0 auto;background:#0a1628;border:1px solid var(--line);border-radius:12px;image-rendering:auto}
 .controls-help{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:center;margin-top:10px;color:var(--muted);font-size:12px}
 .result-overlay{position:absolute;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;border-radius:12px;z-index:5}
 .result-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;text-align:center;min-width:280px}
@@ -156,3 +156,11 @@ body.fighter-touch-playing .fighter-main{
 .map-meta strong{font-size:14px}
 .map-meta small{color:var(--muted);font-size:12px;line-height:1.35}
 .map-label{font-size:12px;color:var(--muted);margin-bottom:2px;font-weight:600}
+
+.fighter-hero{display:flex;gap:16px;align-items:flex-start;margin:10px 0 4px}
+.fighter-portrait{width:110px;height:auto;border-radius:12px;border:1px solid var(--line);background:#0b0f14;object-fit:contain;flex-shrink:0}
+.fighter-hero-body{flex:1;min-width:0}
+@media (max-width:640px){
+  .fighter-hero{flex-direction:column;align-items:center;text-align:center}
+  .fighter-portrait{width:96px}
+}

@@ -312,6 +312,39 @@
     const W = 960,
       H = 540;
 
+    // Mage action sprites (facing right in source art)
+    const SPRITE_KEYS = ["idle", "walk", "attack", "heavy", "jump", "hurt"];
+    const sprites = { p1: {}, p2: {} };
+    let spritesReady = false;
+    (function loadSprites() {
+      let left = SPRITE_KEYS.length * 2;
+      const done = () => {
+        left--;
+        if (left <= 0) spritesReady = true;
+      };
+      for (const key of SPRITE_KEYS) {
+        const a = new Image();
+        a.onload = done;
+        a.onerror = done;
+        a.src = `/static/fighter/sprites/${key}.png`;
+        sprites.p1[key] = a;
+        const b = new Image();
+        b.onload = done;
+        b.onerror = done;
+        b.src = `/static/fighter/sprites/${key}_ai.png`;
+        sprites.p2[key] = b;
+      }
+    })();
+
+    function pickSpriteKey(f) {
+      // 1 idle 2 walk 3 light attack 4 heavy 5 jump 6 hurt
+      if (f.hitstun > 0) return "hurt";
+      if (f.atkTimer > 0) return f.smash ? "heavy" : "attack";
+      if (!f.onGround) return "jump";
+      if (Math.abs(f.vx) > 0.35) return "walk";
+      return "idle";
+    }
+
     let running = false;
     let raf = 0;
     let keys = {};
@@ -1058,27 +1091,51 @@
     function drawFighter(f) {
       const blink = f.invuln > 0 && Math.floor(f.invuln / 3) % 2 === 0;
       if (blink) return;
-      ctx.fillStyle = f.color;
-      roundRect(f.x, f.y, f.w, f.h, 6);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      const ey = f.y + 14;
-      const ex = f.facing > 0 ? f.x + 22 : f.x + 6;
-      ctx.fillRect(ex, ey, 6, 6);
+
+      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const key = pickSpriteKey(f);
+      const img = set[key] || set.idle;
+      const cx = f.x + f.w / 2;
+      const feetY = f.y + f.h;
+      // Visual taller than hitbox; feet stay on hitbox bottom
+      const drawH = 92;
+      let drawW = drawH;
+      if (img && img.complete && img.naturalWidth > 0) {
+        drawW = (img.naturalWidth / img.naturalHeight) * drawH;
+      }
+
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.save();
+        ctx.translate(cx, feetY);
+        ctx.scale(f.facing >= 0 ? 1 : -1, 1);
+        ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
+        ctx.restore();
+      } else {
+        // fallback rectangle while images load
+        ctx.fillStyle = f.color;
+        roundRect(f.x, f.y, f.w, f.h, 6);
+        ctx.fill();
+      }
+
       if (f.damage > 60) {
         ctx.strokeStyle = `rgba(251,191,36,${Math.min(0.8, f.damage / 200)})`;
         ctx.lineWidth = 2;
-        ctx.strokeRect(f.x - 2, f.y - 2, f.w + 4, f.h + 4);
+        ctx.strokeRect(f.x - 4, f.y - 8, f.w + 8, f.h + 10);
       }
+      // subtle attack arc (hitbox already has FX in attack sprite)
       const box = attackBox(f);
-      if (box) {
+      if (box && !(img && img.complete)) {
         ctx.fillStyle = box.smash ? "rgba(251,191,36,.55)" : "rgba(255,255,255,.4)";
         ctx.fillRect(box.x, box.y, box.w, box.h);
+      } else if (box) {
+        ctx.strokeStyle = box.smash ? "rgba(251,191,36,.45)" : "rgba(196,181,253,.35)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(box.x, box.y, box.w, box.h);
       }
-      ctx.fillStyle = "rgba(0,0,0,.45)";
+      ctx.fillStyle = "rgba(0,0,0,.55)";
       ctx.font = "11px sans-serif";
       const label = f.isAI ? "AI" : "YOU";
-      ctx.fillText(label, f.x + 4, f.y - 6);
+      ctx.fillText(label, f.x + f.w / 2 - 10, f.y - 14);
     }
 
     function loop() {
