@@ -418,5 +418,14 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         resp.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, samesite="lax", secure=cookie_secure)
         return resp
 
+    @app.middleware("http")
+    async def fighter_assets_no_cache(request: Request, call_next):
+        """Avoid stale fighter.js showing blue/red rectangles after sprite deploys."""
+        response = await call_next(request)
+        path = request.url.path or ""
+        if path.startswith("/static/fighter") or path in ("/static/fighter.js", "/static/fighter.css", "/static/fighter.html"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

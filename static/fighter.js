@@ -213,13 +213,69 @@
     location.href = "/login";
   };
 
-  function showArena(ctx) {
+  const ASSET_VER = "20261015c";
+  const CHARACTERS = [
+    {
+      id: "herta",
+      name: "大黑塔",
+      tag: "法師・預設",
+      portrait: `/static/fighter/sprites/portrait.png?v=${ASSET_VER}`,
+    },
+  ];
+  let selectedCharId = "herta";
+  let selectTimer = null;
+  let selectLeft = 30;
+  let pendingMatchCtx = null;
+
+  function clearSelectTimer() {
+    if (selectTimer) {
+      clearInterval(selectTimer);
+      selectTimer = null;
+    }
+  }
+
+  function renderCharGrid() {
+    const grid = $("#charSelectGrid");
+    if (!grid) return;
+    grid.innerHTML = CHARACTERS.map((c) => {
+      const on = c.id === selectedCharId ? "selected" : "";
+      return `<button type="button" class="char-card ${on}" data-char="${c.id}" role="radio" aria-checked="${c.id === selectedCharId}">
+        <img src="${c.portrait}" alt="${c.name}" width="120" height="180" draggable="false">
+        <div class="char-name">${c.name}</div>
+        <div class="char-tag">${c.tag}</div>
+      </button>`;
+    }).join("");
+    grid.querySelectorAll(".char-card").forEach((btn) => {
+      btn.onclick = () => {
+        selectedCharId = btn.dataset.char || "herta";
+        renderCharGrid();
+      };
+    });
+  }
+
+  async function beginFight(ctx) {
+    clearSelectTimer();
+    const ov = $("#charSelect");
+    if (ov) ov.classList.add("hidden");
+    ctx.characterId = selectedCharId;
+    try {
+      const ok = await Game.ensureSprites();
+      if (!ok) toast("角色圖片載入未完成，已用備用顯示；請強制重新整理再試");
+    } catch (_) {}
+    Game.start(ctx);
+    Game.refreshVirtPad();
+  }
+
+  function openCharSelect(ctx) {
+    pendingMatchCtx = ctx;
     matchCtx = ctx;
     selectedMapId = ctx.mapId || selectedMapId || "hkex";
     ctx.mapId = selectedMapId;
     $("#lobby").classList.add("hidden");
     $("#arena").classList.remove("hidden");
     $("#resultOverlay").classList.add("hidden");
+    const cs = $("#charSelect");
+    if (cs) cs.classList.remove("hidden");
     $("#p1Name").textContent = ctx.player.display_name || ctx.player.username;
     $("#p2Name").textContent = ctx.opponent.display_name || ctx.opponent.username;
     $("#p1Mini").textContent = `攻${ctx.player.atk} 防${ctx.player.def} 速${ctx.player.spd}`;
@@ -227,11 +283,43 @@
     const map = MAPS[selectedMapId] || MAPS.hkex;
     const label = $("#mapLabel");
     if (label) label.textContent = map.name;
-    Game.start(ctx);
+    $("#roundMsg").textContent = "選擇角色…";
+    Game.stop();
     Game.refreshVirtPad();
+    renderCharGrid();
+    selectLeft = 30;
+    const secEl = $("#charSelectSec");
+    if (secEl) secEl.textContent = String(selectLeft);
+    clearSelectTimer();
+    selectTimer = setInterval(() => {
+      selectLeft -= 1;
+      if (secEl) secEl.textContent = String(Math.max(0, selectLeft));
+      if (selectLeft <= 0) {
+        clearSelectTimer();
+        beginFight(pendingMatchCtx || ctx);
+      }
+    }, 1000);
+    // Warm sprites during select
+    Game.ensureSprites();
+  }
+
+  function showArena(ctx) {
+    openCharSelect(ctx);
+  }
+
+  const btnConfirmChar = $("#btnConfirmChar");
+  if (btnConfirmChar) {
+    btnConfirmChar.onclick = () => {
+      if (!pendingMatchCtx && !matchCtx) return;
+      beginFight(pendingMatchCtx || matchCtx);
+    };
   }
 
   function showLobby() {
+    clearSelectTimer();
+    pendingMatchCtx = null;
+    const cs = $("#charSelect");
+    if (cs) cs.classList.add("hidden");
     Game.stop();
     $("#arena").classList.add("hidden");
     $("#lobby").classList.remove("hidden");
@@ -312,29 +400,73 @@
     const W = 960,
       H = 540;
 
-    // Mage action sprites (facing right in source art)
+    // 大黑塔 action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
+    const ASSET_VER = "20261015c";
     const SPRITE_KEYS = ["idle", "walk", "attack", "heavy", "jump", "hurt"];
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
-    (function loadSprites() {
-      let left = SPRITE_KEYS.length * 2;
-      const done = () => {
-        left--;
-        if (left <= 0) spritesReady = true;
-      };
-      for (const key of SPRITE_KEYS) {
-        const a = new Image();
-        a.onload = done;
-        a.onerror = done;
-        a.src = `/static/fighter/sprites/${key}.png`;
-        sprites.p1[key] = a;
-        const b = new Image();
-        b.onload = done;
-        b.onerror = done;
-        b.src = `/static/fighter/sprites/${key}_ai.png`;
-        sprites.p2[key] = b;
-      }
-    })();
+    let spritesFailed = 0;
+    let spritesPromise = null;
+
+    function spriteUrl(file) {
+      return `/static/fighter/sprites/${file}?v=${ASSET_VER}`;
+    }
+
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        const tryLoad = (src, isRetry) => {
+          const img = new Image();
+          img.decoding = "async";
+          img.onload = async () => {
+            try {
+              if (img.decode) await img.decode();
+            } catch (_) {}
+            resolve(img);
+          };
+          img.onerror = () => {
+            if (!isRetry) {
+              tryLoad(src + (src.includes("?") ? "&" : "?") + "r=" + Date.now(), true);
+            } else {
+              resolve(img); // naturalWidth stays 0
+            }
+          };
+          img.src = src;
+        };
+        tryLoad(url, false);
+      });
+    }
+
+    function ensureSprites() {
+      if (spritesReady) return Promise.resolve(true);
+      if (spritesPromise) return spritesPromise;
+      spritesPromise = (async () => {
+        spritesFailed = 0;
+        const jobs = [];
+        for (const key of SPRITE_KEYS) {
+          jobs.push(
+            loadImage(spriteUrl(`${key}.png`)).then((img) => {
+              sprites.p1[key] = img;
+              if (!(img && img.naturalWidth > 0)) spritesFailed++;
+            })
+          );
+          jobs.push(
+            loadImage(spriteUrl(`${key}_ai.png`)).then((img) => {
+              sprites.p2[key] = img;
+              if (!(img && img.naturalWidth > 0)) spritesFailed++;
+            })
+          );
+        }
+        await Promise.all(jobs);
+        spritesReady = SPRITE_KEYS.every(
+          (k) => sprites.p1[k] && sprites.p1[k].naturalWidth > 0 && sprites.p2[k] && sprites.p2[k].naturalWidth > 0
+        );
+        window.__FIGHTER_SPRITES__ = { ready: spritesReady, failed: spritesFailed, sprites };
+        return spritesReady;
+      })();
+      return spritesPromise;
+    }
+    // Kick off preload immediately
+    ensureSprites();
 
     function pickSpriteKey(f) {
       // 1 idle 2 walk 3 light attack 4 heavy 5 jump 6 hurt
@@ -649,7 +781,8 @@
         box.y < defender.y + defender.h &&
         box.y + box.h > defender.y
       ) {
-        const base = box.smash ? 14 : 8;
+        // Light base 8; heavy = 4× light (32). Same ATK multiplier.
+        const base = box.smash ? 32 : 8;
         const dmg = base * (0.7 + attacker.stats.atk / 100);
         defender.damage += dmg;
         const kb =
@@ -1098,20 +1231,30 @@
       const cx = f.x + f.w / 2;
       const feetY = f.y + f.h;
       // Visual taller than hitbox; feet stay on hitbox bottom
-      const drawH = 92;
+      const drawH = 118;
       let drawW = drawH;
-      if (img && img.complete && img.naturalWidth > 0) {
+      const ok = !!(img && img.complete && img.naturalWidth > 0);
+      if (ok) {
         drawW = (img.naturalWidth / img.naturalHeight) * drawH;
       }
 
-      if (img && img.complete && img.naturalWidth > 0) {
+      // Soft ground shadow so fighters read clearly on platforms
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      ctx.beginPath();
+      ctx.ellipse(cx, feetY - 2, 22, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      if (ok) {
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
         ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
         ctx.restore();
       } else {
-        // fallback rectangle while images load
+        // brief fallback while loading / if asset missing — kick another preload
+        if (!spritesReady) ensureSprites();
         ctx.fillStyle = f.color;
         roundRect(f.x, f.y, f.w, f.h, 6);
         ctx.fill();
@@ -1173,7 +1316,7 @@
       draw();
     }
 
-    return { start, stop, refreshVirtPad, MAPS };
+    return { start, stop, refreshVirtPad, MAPS, ensureSprites, get spritesReady() { return spritesReady; } };
   })();
 
   // expose map catalog for tests / debugging
