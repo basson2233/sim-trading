@@ -404,7 +404,10 @@
     const ASSET_VER = "20261015d";
     const SPRITE_KEYS = ["idle", "walk", "attack", "heavy", "jump", "hurt"];
     const WALK_FRAMES = 6;
-    const WALK_FRAME_TICKS = 7; // ~8.5 fps at 60Hz
+    const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
+    const SIM_HZ = 60;
+    const SIM_DT = 1 / SIM_HZ;
+    const MAX_FRAME_DT = 0.05; // 50ms cap — avoid spiral after tab switch
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
     let spritesFailed = 0;
@@ -488,6 +491,8 @@
     let aiState = { cool: 0, jumpCool: 0 };
     let mapState = null; // live platforms + blast + spawn
     let tick = 0;
+    let lastFrameTs = 0;
+    let simAccum = 0;
 
     function cloneMap(mapId) {
       const src = MAPS[mapId] || MAPS.hkex;
@@ -607,6 +612,8 @@
       p2 = fighter(meta.opponent, mapState.spawn.p2x, -1, "#ea3943", true);
       roundLock = 90;
       tick = 0;
+      lastFrameTs = 0;
+      simAccum = 0;
       $("#roundMsg").textContent = "準備…";
       $("#resultOverlay").classList.add("hidden");
       running = true;
@@ -759,7 +766,7 @@
     function tryAttack(f, smash) {
       if (f.hitstun > 0 || f.atkCool > 0 || f.atkTimer > 0) return;
       f.smash = !!smash;
-      // ~60fps: normal attack 0.5s CD (30f), heavy attack (重攻擊) 5s CD (300f)
+      // Fixed 60Hz sim: normal 0.5s CD (30f), heavy 5s CD (300f)
       f.atkTimer = smash ? 18 : 12;
       f.atkCool = smash ? 300 : 30;
     }
@@ -1300,9 +1307,7 @@
       ctx.fillText(label, f.x + f.w / 2 - 10, f.y - 14);
     }
 
-    function loop() {
-      if (!running) return;
-      raf = requestAnimationFrame(loop);
+    function simStep() {
       tick++;
       if (roundLock > 0) {
         // still animate platforms during countdown for visual life
@@ -1310,7 +1315,6 @@
         roundLock--;
         if (roundLock === 30) $("#roundMsg").textContent = "開始！";
         if (roundLock === 0) $("#roundMsg").textContent = "擊飛出界！";
-        draw();
         return;
       }
       updateMovingPlatforms();
@@ -1328,10 +1332,28 @@
       }
       particles = particles.filter((p) => p.life > 0);
       updateAttackButtonCooldown();
-      if (checkKO(p1, "p1") || checkKO(p2, "p2")) {
-        draw();
-        return;
+      if (checkKO(p1, "p1") || checkKO(p2, "p2")) return;
+    }
+
+    // Fixed 60Hz simulation driven by real time so 320Hz displays match 60Hz feel.
+    function loop(ts) {
+      if (!running) return;
+      raf = requestAnimationFrame(loop);
+      if (typeof ts !== "number") ts = performance.now();
+      if (!lastFrameTs) lastFrameTs = ts;
+      let dt = (ts - lastFrameTs) / 1000;
+      lastFrameTs = ts;
+      if (dt > MAX_FRAME_DT) dt = MAX_FRAME_DT;
+      if (dt < 0) dt = 0;
+      simAccum += dt;
+      let steps = 0;
+      const maxSteps = 5; // ~83ms catch-up max
+      while (simAccum >= SIM_DT && steps < maxSteps && running) {
+        simStep();
+        simAccum -= SIM_DT;
+        steps++;
       }
+      if (steps >= maxSteps) simAccum = 0;
       draw();
     }
 
