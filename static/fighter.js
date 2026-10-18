@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018o";
+  const ASSET_VER = "20261018p";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018o";
+    const ASSET_VER = "20261018p";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -1320,9 +1320,9 @@
         return;
       }
       stopRunIfNeeded(!!left, !!right);
-      // Run only grounded; keep flag in air until key release / opposite
+      // Run momentum persists in air (jump from run keeps run speed until land/cancel)
       const base = p1.onGround ? p1.moveSpd : p1.airSpd;
-      const spd = p1.running && p1.onGround ? base * RUN_SPD_MULT : base;
+      const spd = p1.running ? p1.moveSpd * RUN_SPD_MULT : base;
       if (left) {
         p1.vx = -spd;
         p1.facing = -1;
