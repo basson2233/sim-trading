@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018e";
+  const ASSET_VER = "20261018f";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018e";
+    const ASSET_VER = "20261018f";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -426,13 +426,15 @@
     };
     const WALK_FRAMES = 6;
     const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
+    const HEAVY_FRAMES = 4;
+    const HEAVY_ATK_FRAMES = 300; // 5s at 60Hz — charge/cast/aim/laser
     const SIM_HZ = 60;
     const SIM_DT = 1 / SIM_HZ;
     const MAX_FRAME_DT = 0.05; // 50ms cap — avoid spiral after tab switch
     const STAMINA_MAX = 100;
     const STAMINA_REGEN_PER_SEC = 20; // full bar in 5s when idle
     const STAMINA_COST_NORMAL = 20;
-    const STAMINA_COST_HEAVY = 40;
+    const STAMINA_COST_HEAVY = 99;
     const COMBO_WINDOW_FRAMES = 36; // 0.6s at 60Hz to chain next hit
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
@@ -606,6 +608,7 @@
         atkTimer: 0,
         atkCool: 0, // unused (kept for compat); stamina gates attacks now
         atkKind: null, // attack1|attack2|attack3|crouch_attack|aerial_attack|heavy
+        atkConnected: false, // heavy laser hits once per swing
         smash: false,
         stamina: STAMINA_MAX,
         comboStep: 0, // 0 = next light is attack1
@@ -637,6 +640,7 @@
       p1.invuln = 45;
       p1.atkTimer = p1.atkCool = 0;
       p1.atkKind = null;
+      p1.atkConnected = false;
       p1.smash = false;
       p1.stamina = STAMINA_MAX;
       p1.comboStep = 0;
@@ -654,6 +658,7 @@
       p2.invuln = 45;
       p2.atkTimer = p2.atkCool = 0;
       p2.atkKind = null;
+      p2.atkConnected = false;
       p2.smash = false;
       p2.stamina = STAMINA_MAX;
       p2.comboStep = 0;
@@ -893,7 +898,8 @@
         f.stamina -= STAMINA_COST_HEAVY;
         f.smash = true;
         f.atkKind = "heavy";
-        f.atkTimer = 18;
+        f.atkTimer = HEAVY_ATK_FRAMES; // 5s laser sequence
+        f.atkConnected = false;
         f.atkCool = 0;
         f.comboStep = 0;
         f.comboWindow = 0;
@@ -957,9 +963,11 @@
       let hh = 28;
       let smash = false;
       if (kind === "heavy") {
-        active = f.atkTimer <= 12 && f.atkTimer >= 6;
-        reach = 52;
-        hh = 36;
+        // Laser active on aim tip + beam frames (last ~90 of 300)
+        active = f.atkTimer <= 90 && f.atkTimer >= 1;
+        reach = 220; // long straight beam (~4× old heavy reach 52)
+        hy = f.y + 14;
+        hh = 24;
         smash = true;
       } else if (kind === "aerial_attack") {
         active = f.atkTimer <= 10 && f.atkTimer >= 4;
@@ -993,6 +1001,8 @@
       if (defender.invuln > 0 || defender.hitstun > 0) return;
       const box = attackBox(attacker);
       if (!box) return;
+      // Heavy laser: one connect per swing (animation keeps playing full 5s)
+      if (box.smash && attacker.atkConnected) return;
       if (
         box.x < defender.x + defender.w &&
         box.x + box.w > defender.x &&
@@ -1015,16 +1025,21 @@
         defender.hitstun = Math.min(40, 8 + defender.damage * 0.08);
         defender.onGround = false;
         defender.onPlat = null;
-        // Cancel swing early on connect; keep combo window for attack1/2
-        if (attacker.atkKind === "attack1" || attacker.atkKind === "attack2") {
+        if (box.smash) {
+          attacker.atkConnected = true;
+          // Keep heavy animation running full HEAVY_ATK_FRAMES
+        } else if (attacker.atkKind === "attack1" || attacker.atkKind === "attack2") {
           attacker.comboWindow = COMBO_WINDOW_FRAMES;
+          attacker.atkTimer = 0;
+          attacker.atkKind = null;
+          attacker.smash = false;
         } else {
           attacker.comboStep = 0;
           attacker.comboWindow = 0;
+          attacker.atkTimer = 0;
+          attacker.atkKind = null;
+          attacker.smash = false;
         }
-        attacker.atkTimer = 0;
-        attacker.atkKind = null;
-        attacker.smash = false;
         for (let i = 0; i < 8; i++) {
           particles.push({
             x: defender.x + defender.w / 2,
@@ -1098,6 +1113,7 @@
         }
         f.atkKind = null;
         f.smash = false;
+        f.atkConnected = false;
       }
       if (f.comboWindow > 0) {
         f.comboWindow--;
@@ -1206,6 +1222,8 @@
 
     function controlP1() {
       if (p1.hitstun > 0) return;
+      // Root during heavy laser cast (5s) — facing stays locked
+      if (p1.atkTimer > 0 && p1.atkKind === "heavy") return;
       const down = keys["ArrowDown"] || keys["s"] || keys["S"];
       p1.crouching = !!(p1.onGround && down && p1.atkTimer <= 0);
       const left = keys["ArrowLeft"] || keys["a"] || keys["A"];
@@ -1230,6 +1248,7 @@
     function controlAI() {
       const f = p2;
       if (f.hitstun > 0) return;
+      if (f.atkTimer > 0 && f.atkKind === "heavy") return;
       aiState.cool--;
       aiState.jumpCool--;
       const target = p1;
@@ -1493,6 +1512,8 @@
       let drawW = drawH;
       const ok = !!(img && img.complete && img.naturalWidth > 0);
       const isWalkStrip = key === "walk" && ok && img.naturalWidth >= img.naturalHeight * 2;
+      const isHeavyStrip =
+        key === "heavy" && ok && img.naturalWidth >= img.naturalHeight * 2 && f.atkTimer > 0;
       let srcX = 0,
         srcY = 0,
         srcW = 0,
@@ -1503,6 +1524,18 @@
           srcH = img.naturalHeight;
           srcX = (Math.floor(tick / WALK_FRAME_TICKS) % WALK_FRAMES) * srcW;
           srcY = 0;
+          drawW = (srcW / srcH) * drawH;
+        } else if (isHeavyStrip) {
+          srcW = img.naturalWidth / HEAVY_FRAMES;
+          srcH = img.naturalHeight;
+          const elapsed = Math.max(0, HEAVY_ATK_FRAMES - f.atkTimer);
+          const frameIdx = Math.min(
+            HEAVY_FRAMES - 1,
+            Math.floor(elapsed / (HEAVY_ATK_FRAMES / HEAVY_FRAMES))
+          );
+          srcX = frameIdx * srcW;
+          srcY = 0;
+          // Laser frame is wide — keep aspect; slightly larger draw for beam readability
           drawW = (srcW / srcH) * drawH;
         } else {
           drawW = (img.naturalWidth / img.naturalHeight) * drawH;
@@ -1521,7 +1554,7 @@
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
-        if (isWalkStrip) {
+        if (isWalkStrip || isHeavyStrip) {
           ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, -drawH, drawW, drawH);
         } else {
           ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
