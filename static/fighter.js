@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018r";
+  const ASSET_VER = "20261018s";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018r";
+    const ASSET_VER = "20261018s";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -433,10 +433,10 @@
     const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
     const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
     const CROUCH_ATK_FRAMES = 4; // crouch strip: windup + mid + impact + hold
-    const CROUCH_CHAR_FRAME_TICKS = 45; // 0.75s per char frame (frames 1–3; frame 4 holds during FX)
-    const CROUCH_FX_START = 3 * CROUCH_CHAR_FRAME_TICKS; // after frame 3 finishes (elapsed 135)
+    const CROUCH_CHAR_FRAME_TICKS = 30; // 0.5s per char frame — frames 1–3 = 1.5s total
+    const CROUCH_FX_START = 3 * CROUCH_CHAR_FRAME_TICKS; // after frame 3 finishes (elapsed 90)
     const CROUCH_FX_DURATION = 60; // VFX alone 1s @60Hz
-    const CROUCH_ATK_DURATION = CROUCH_FX_START + CROUCH_FX_DURATION; // 195: strip then 1s FX
+    const CROUCH_ATK_DURATION = CROUCH_FX_START + CROUCH_FX_DURATION; // 150: 1.5s strip then 1s FX
     const CROUCH_AERIAL_ATK_DURATION = 36; // aerial stays 0.6s — 3 frames × 0.2s
     const CROUCH_FX_SIDE = 288; // square VFX/hitbox: 3× prior crouch reach (96)
     const CROUCH_FX_AHEAD = 2; // place FX center ~2 character widths ahead of front
