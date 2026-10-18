@@ -11,3 +11,6 @@ data/
 password-resets.log
 *.log
 screenshot*.png
+
+# Fighter generation working assets
+static/fighter/sprites/_sources/

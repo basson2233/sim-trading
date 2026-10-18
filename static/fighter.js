@@ -213,13 +213,25 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261015d";
+  const ASSET_VER = "20261018b";
   const CHARACTERS = [
     {
       id: "herta",
       name: "大黑塔",
       tag: "法師・預設",
-      portrait: `/static/fighter/sprites/portrait.png?v=${ASSET_VER}`,
+      portrait: `/static/fighter/sprites/herta/portrait.png?v=${ASSET_VER}`,
+    },
+    {
+      id: "golden_bull",
+      name: "金牛",
+      tag: "多頭・攻勢",
+      portrait: `/static/fighter/sprites/golden_bull/portrait.png?v=${ASSET_VER}`,
+    },
+    {
+      id: "short_bear",
+      name: "空頭熊",
+      tag: "空頭・重擊",
+      portrait: `/static/fighter/sprites/short_bear/portrait.png?v=${ASSET_VER}`,
     },
   ];
   let selectedCharId = "herta";
@@ -237,10 +249,11 @@
   function renderCharGrid() {
     const grid = $("#charSelectGrid");
     if (!grid) return;
+    const fallbackPortrait = `/static/fighter/sprites/portrait.png?v=${ASSET_VER}`;
     grid.innerHTML = CHARACTERS.map((c) => {
       const on = c.id === selectedCharId ? "selected" : "";
       return `<button type="button" class="char-card ${on}" data-char="${c.id}" role="radio" aria-checked="${c.id === selectedCharId}">
-        <img src="${c.portrait}" alt="${c.name}" width="120" height="180" draggable="false">
+        <img src="${c.portrait}" alt="${c.name}" width="120" height="180" draggable="false" onerror="this.onerror=null;this.src='${fallbackPortrait}'">
         <div class="char-name">${c.name}</div>
         <div class="char-tag">${c.tag}</div>
       </button>`;
@@ -249,6 +262,7 @@
       btn.onclick = () => {
         selectedCharId = btn.dataset.char || "herta";
         renderCharGrid();
+        Game.ensureSprites(selectedCharId);
       };
     });
   }
@@ -259,7 +273,7 @@
     if (ov) ov.classList.add("hidden");
     ctx.characterId = selectedCharId;
     try {
-      const ok = await Game.ensureSprites();
+      const ok = await Game.ensureSprites(selectedCharId);
       if (!ok) toast("角色圖片載入未完成，已用備用顯示；請強制重新整理再試");
     } catch (_) {}
     Game.start(ctx);
@@ -300,7 +314,7 @@
       }
     }, 1000);
     // Warm sprites during select
-    Game.ensureSprites();
+    Game.ensureSprites(selectedCharId);
   }
 
   function showArena(ctx) {
@@ -400,20 +414,49 @@
     const W = 960,
       H = 540;
 
-    // 大黑塔 action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261015d";
-    const SPRITE_KEYS = ["idle", "walk", "attack", "heavy", "jump", "hurt"];
+    // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
+    const ASSET_VER = "20261018b";
+    const SPRITE_KEYS = [
+      "idle",
+      "walk",
+      "attack1",
+      "attack2",
+      "attack3",
+      "crouch_attack",
+      "aerial_attack",
+      "heavy",
+      "jump",
+      "hurt",
+    ];
+    // Until new art lands, map missing keys to legacy attack.png (or closest).
+    const SPRITE_FALLBACK = {
+      attack1: "attack",
+      attack2: "attack",
+      attack3: "attack",
+      crouch_attack: "attack",
+      aerial_attack: "attack",
+    };
     const WALK_FRAMES = 6;
     const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
     const SIM_HZ = 60;
     const SIM_DT = 1 / SIM_HZ;
     const MAX_FRAME_DT = 0.05; // 50ms cap — avoid spiral after tab switch
+    const STAMINA_MAX = 100;
+    const STAMINA_REGEN_PER_SEC = 20; // full bar in 5s when idle
+    const STAMINA_COST_NORMAL = 20;
+    const STAMINA_COST_HEAVY = 40;
+    const COMBO_WINDOW_FRAMES = 36; // 0.6s at 60Hz to chain next hit
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
     let spritesFailed = 0;
     let spritesPromise = null;
+    let spritesCharId = null;
 
-    function spriteUrl(file) {
+    function spriteUrl(charId, file) {
+      return `/static/fighter/sprites/${charId}/${file}?v=${ASSET_VER}`;
+    }
+
+    function flatSpriteUrl(file) {
       return `/static/fighter/sprites/${file}?v=${ASSET_VER}`;
     }
 
@@ -441,42 +484,73 @@
       });
     }
 
-    function ensureSprites() {
-      if (spritesReady) return Promise.resolve(true);
+    async function loadSpriteWithFallback(charId, fileBase) {
+      // Prefer /sprites/{id}/{file}; fall back to flat /sprites/{file} (herta legacy).
+      let img = await loadImage(spriteUrl(charId, fileBase));
+      if (img && img.naturalWidth > 0) return img;
+      img = await loadImage(flatSpriteUrl(fileBase));
+      if (img && img.naturalWidth > 0) return img;
+      // Last resort: legacy attack art for new attack keys
+      const stem = fileBase.replace(/_ai\.png$/, "").replace(/\.png$/, "");
+      const fb = SPRITE_FALLBACK[stem];
+      if (fb) {
+        const ai = fileBase.includes("_ai");
+        const fbFile = ai ? `${fb}_ai.png` : `${fb}.png`;
+        img = await loadImage(spriteUrl(charId, fbFile));
+        if (img && img.naturalWidth > 0) return img;
+        img = await loadImage(flatSpriteUrl(fbFile));
+      }
+      return img;
+    }
+
+    function ensureSprites(charId) {
+      const id = charId || selectedCharId || "herta";
+      if (spritesReady && spritesCharId === id) return Promise.resolve(true);
+      // Reload when character changes
+      if (spritesCharId !== id) {
+        spritesPromise = null;
+        spritesReady = false;
+      }
       if (spritesPromise) return spritesPromise;
+      spritesCharId = id;
       spritesPromise = (async () => {
         spritesFailed = 0;
         const jobs = [];
         for (const key of SPRITE_KEYS) {
           jobs.push(
-            loadImage(spriteUrl(`${key}.png`)).then((img) => {
+            loadSpriteWithFallback(id, `${key}.png`).then((img) => {
               sprites.p1[key] = img;
               if (!(img && img.naturalWidth > 0)) spritesFailed++;
             })
           );
           jobs.push(
-            loadImage(spriteUrl(`${key}_ai.png`)).then((img) => {
+            loadSpriteWithFallback(id, `${key}_ai.png`).then((img) => {
               sprites.p2[key] = img;
               if (!(img && img.naturalWidth > 0)) spritesFailed++;
             })
           );
         }
         await Promise.all(jobs);
+        // Also keep legacy "attack" alias pointing at attack1 for any leftover refs
+        sprites.p1.attack = sprites.p1.attack1;
+        sprites.p2.attack = sprites.p2.attack1;
         spritesReady = SPRITE_KEYS.every(
           (k) => sprites.p1[k] && sprites.p1[k].naturalWidth > 0 && sprites.p2[k] && sprites.p2[k].naturalWidth > 0
         );
-        window.__FIGHTER_SPRITES__ = { ready: spritesReady, failed: spritesFailed, sprites };
+        window.__FIGHTER_SPRITES__ = { ready: spritesReady, failed: spritesFailed, sprites, charId: id };
         return spritesReady;
       })();
       return spritesPromise;
     }
-    // Kick off preload immediately
-    ensureSprites();
+    // Kick off preload immediately (default herta)
+    ensureSprites("herta");
 
     function pickSpriteKey(f) {
-      // 1 idle 2 walk 3 light attack 4 heavy 5 jump 6 hurt
       if (f.hitstun > 0) return "hurt";
-      if (f.atkTimer > 0) return f.smash ? "heavy" : "attack";
+      if (f.atkTimer > 0) {
+        if (f.atkKind && SPRITE_KEYS.includes(f.atkKind)) return f.atkKind;
+        return f.smash ? "heavy" : "attack1";
+      }
       if (!f.onGround) return "jump";
       if (Math.abs(f.vx) > 0.35) return "walk";
       return "idle";
@@ -542,10 +616,15 @@
         onPlat: null,
         jumps: 2,
         atkTimer: 0,
-        atkCool: 0,
+        atkCool: 0, // unused (kept for compat); stamina gates attacks now
+        atkKind: null, // attack1|attack2|attack3|crouch_attack|aerial_attack|heavy
+        smash: false,
+        stamina: STAMINA_MAX,
+        comboStep: 0, // 0 = next light is attack1
+        comboWindow: 0,
+        crouching: false,
         hitstun: 0,
         invuln: 0,
-        smash: false,
         isAI: !!isAI,
         moveSpd: (3.2 + (spd - 50) * 0.06) * 0.25,
         airSpd: (3.0 + (spd - 50) * 0.05) * 0.25,
@@ -569,6 +648,12 @@
       p1.hitstun = 0;
       p1.invuln = 45;
       p1.atkTimer = p1.atkCool = 0;
+      p1.atkKind = null;
+      p1.smash = false;
+      p1.stamina = STAMINA_MAX;
+      p1.comboStep = 0;
+      p1.comboWindow = 0;
+      p1.crouching = false;
       p2.x = mapState.spawn.p2x;
       p2.y = gy - p2.h;
       p2.vx = p2.vy = 0;
@@ -580,6 +665,12 @@
       p2.hitstun = 0;
       p2.invuln = 45;
       p2.atkTimer = p2.atkCool = 0;
+      p2.atkKind = null;
+      p2.smash = false;
+      p2.stamina = STAMINA_MAX;
+      p2.comboStep = 0;
+      p2.comboWindow = 0;
+      p2.crouching = false;
       particles = [];
       updateHud();
     }
@@ -591,6 +682,20 @@
       $("#p2Stocks").textContent = "●".repeat(stocks.p2) + "○".repeat(Math.max(0, kosToWin - stocks.p2));
       $("#p1Pct").style.color = dmgColor(p1.damage);
       $("#p2Pct").style.color = dmgColor(p2.damage);
+      updateStaminaHud();
+    }
+
+    function updateStaminaHud() {
+      const setBar = (fillId, textId, f) => {
+        const fill = document.getElementById(fillId);
+        const txt = document.getElementById(textId);
+        if (!f) return;
+        const pct = Math.max(0, Math.min(100, (f.stamina / STAMINA_MAX) * 100));
+        if (fill) fill.style.width = pct + "%";
+        if (txt) txt.textContent = Math.floor(f.stamina);
+      };
+      setBar("p1StamFill", "p1StamVal", p1);
+      setBar("p2StamFill", "p2StamVal", p2);
     }
 
     function dmgColor(d) {
@@ -603,6 +708,7 @@
     function start(meta) {
       stop();
       matchMeta = meta;
+      ensureSprites(meta.characterId || selectedCharId || "herta");
       mapState = cloneMap(meta.mapId || selectedMapId || "hkex");
       const label = $("#mapLabel");
       if (label) label.textContent = mapState.name;
@@ -637,15 +743,37 @@
     function onKey(e, down) {
       const k = e.key;
       if (
-        ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "z", "Z", "j", "J", "w", "W", "a", "A", "d", "D", "s", "S"].includes(
-          k
-        )
+        [
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+          " ",
+          "z",
+          "Z",
+          "j",
+          "J",
+          "k",
+          "K",
+          "w",
+          "W",
+          "a",
+          "A",
+          "d",
+          "D",
+          "s",
+          "S",
+        ].includes(k)
       ) {
         e.preventDefault();
       }
       keys[k] = down;
+      if (!running || !p1) return;
       if (down && (k === "z" || k === "Z" || k === " " || k === "j" || k === "J")) {
-        tryAttack(p1, keys["ArrowDown"] || keys["s"] || keys["S"]);
+        tryAttack(p1, false); // light / crouch / aerial (context from stance)
+      }
+      if (down && (k === "k" || k === "K")) {
+        tryAttack(p1, true); // heavy
       }
       if (down && (k === "ArrowUp" || k === "w" || k === "W")) tryJump(p1);
     }
@@ -678,9 +806,14 @@
     function updateAttackButtonCooldown() {
       const pad = $("#virtPad");
       if (!pad) return;
-      const cooling = !!(p1 && (p1.atkCool > 0 || p1.atkTimer > 0));
-      pad.querySelectorAll('.virt-btn.action.attack, .virt-btn.action.smash').forEach((btn) => {
-        btn.classList.toggle("on-cooldown", cooling);
+      const busy = !!(p1 && p1.atkTimer > 0);
+      const lowLight = !!(p1 && p1.stamina < STAMINA_COST_NORMAL);
+      const lowHeavy = !!(p1 && p1.stamina < STAMINA_COST_HEAVY);
+      pad.querySelectorAll(".virt-btn.action.attack").forEach((btn) => {
+        btn.classList.toggle("on-cooldown", busy || lowLight);
+      });
+      pad.querySelectorAll(".virt-btn.action.smash").forEach((btn) => {
+        btn.classList.toggle("on-cooldown", busy || lowHeavy);
       });
     }
 
@@ -711,7 +844,7 @@
         if (!running || !p1) return;
         if (action === "jump") tryJump(p1);
         if (action === "attack") {
-          tryAttack(p1, !!(keys["ArrowDown"] || keys["s"] || keys["S"]));
+          tryAttack(p1, false);
         }
         if (action === "smash") {
           tryAttack(p1, true);
@@ -763,21 +896,109 @@
       }
     }
 
-    function tryAttack(f, smash) {
-      if (f.hitstun > 0 || f.atkCool > 0 || f.atkTimer > 0) return;
-      f.smash = !!smash;
-      // Fixed 60Hz sim: normal 0.5s CD (30f), heavy 5s CD (300f)
-      f.atkTimer = smash ? 18 : 12;
-      f.atkCool = smash ? 300 : 30;
+    function tryAttack(f, heavy) {
+      if (!f || f.hitstun > 0 || f.atkTimer > 0) return false;
+
+      // Heavy (K / 重攻擊鍵) — ground preferred; still allow in air as smash aerial
+      if (heavy) {
+        if (f.stamina < STAMINA_COST_HEAVY) return false;
+        f.stamina -= STAMINA_COST_HEAVY;
+        f.smash = true;
+        f.atkKind = "heavy";
+        f.atkTimer = 18;
+        f.atkCool = 0;
+        f.comboStep = 0;
+        f.comboWindow = 0;
+        updateStaminaHud();
+        updateAttackButtonCooldown();
+        return true;
+      }
+
+      if (f.stamina < STAMINA_COST_NORMAL) return false;
+
+      // Aerial light
+      if (!f.onGround) {
+        f.stamina -= STAMINA_COST_NORMAL;
+        f.smash = false;
+        f.atkKind = "aerial_attack";
+        f.atkTimer = 14;
+        f.atkCool = 0;
+        f.comboStep = 0;
+        f.comboWindow = 0;
+        updateStaminaHud();
+        updateAttackButtonCooldown();
+        return true;
+      }
+
+      // Crouch light (hold ↓ / S on ground) — read keys too so same-frame ↓+Z works
+      const holdDown = !f.isAI && (keys["ArrowDown"] || keys["s"] || keys["S"]);
+      if (f.onGround && (f.crouching || holdDown)) {
+        f.stamina -= STAMINA_COST_NORMAL;
+        f.smash = false;
+        f.atkKind = "crouch_attack";
+        f.atkTimer = 12;
+        f.atkCool = 0;
+        f.comboStep = 0;
+        f.comboWindow = 0;
+        updateStaminaHud();
+        updateAttackButtonCooldown();
+        return true;
+      }
+
+      // Standing 3-hit combo
+      f.stamina -= STAMINA_COST_NORMAL;
+      if (f.comboWindow <= 0) f.comboStep = 0;
+      f.comboStep = Math.min(3, (f.comboStep || 0) + 1);
+      f.smash = false;
+      f.atkKind = "attack" + f.comboStep;
+      // Slightly longer active on finisher
+      f.atkTimer = f.comboStep === 3 ? 16 : f.comboStep === 2 ? 13 : 12;
+      f.atkCool = 0;
+      f.comboWindow = 0; // re-armed when this swing ends
+      updateStaminaHud();
+      updateAttackButtonCooldown();
+      return true;
     }
 
     function attackBox(f) {
       if (f.atkTimer <= 0) return null;
-      const active = f.smash ? f.atkTimer <= 12 && f.atkTimer >= 6 : f.atkTimer <= 8 && f.atkTimer >= 3;
+      const kind = f.atkKind || (f.smash ? "heavy" : "attack1");
+      let active = false;
+      let reach = 72;
+      let hy = f.y + 10;
+      let hh = 28;
+      let smash = false;
+      if (kind === "heavy") {
+        active = f.atkTimer <= 12 && f.atkTimer >= 6;
+        reach = 52;
+        hh = 36;
+        smash = true;
+      } else if (kind === "aerial_attack") {
+        active = f.atkTimer <= 10 && f.atkTimer >= 4;
+        reach = 78;
+        hy = f.y + 4;
+        hh = 34;
+      } else if (kind === "crouch_attack") {
+        active = f.atkTimer <= 8 && f.atkTimer >= 3;
+        reach = 70;
+        hy = f.y + f.h - 22;
+        hh = 20;
+      } else if (kind === "attack2") {
+        active = f.atkTimer <= 9 && f.atkTimer >= 3;
+        reach = 84;
+        hh = 30;
+      } else if (kind === "attack3") {
+        active = f.atkTimer <= 11 && f.atkTimer >= 4;
+        reach = 92;
+        hh = 32;
+      } else {
+        // attack1
+        active = f.atkTimer <= 8 && f.atkTimer >= 3;
+        reach = 80;
+      }
       if (!active) return null;
-      const reach = f.smash ? 52 : 80;
       const hx = f.facing > 0 ? f.x + f.w - 4 : f.x - reach + 4;
-      return { x: hx, y: f.y + 10, w: reach, h: f.smash ? 36 : 28, smash: f.smash };
+      return { x: hx, y: hy, w: reach, h: hh, smash, kind };
     }
 
     function hit(attacker, defender) {
@@ -790,8 +1011,8 @@
         box.y < defender.y + defender.h &&
         box.y + box.h > defender.y
       ) {
-        // Light base 8; heavy = 4× light (32). Same ATK multiplier.
-        const base = box.smash ? 32 : 8;
+        // Light base 8 (combo3 = 10); heavy = 4× light (32). Same ATK multiplier.
+        const base = box.smash ? 32 : box.kind === "attack3" ? 10 : box.kind === "aerial_attack" ? 9 : 8;
         const dmg = base * (0.7 + attacker.stats.atk / 100);
         defender.damage += dmg;
         const kb =
@@ -806,7 +1027,16 @@
         defender.hitstun = Math.min(40, 8 + defender.damage * 0.08);
         defender.onGround = false;
         defender.onPlat = null;
+        // Cancel swing early on connect; keep combo window for attack1/2
+        if (attacker.atkKind === "attack1" || attacker.atkKind === "attack2") {
+          attacker.comboWindow = COMBO_WINDOW_FRAMES;
+        } else {
+          attacker.comboStep = 0;
+          attacker.comboWindow = 0;
+        }
         attacker.atkTimer = 0;
+        attacker.atkKind = null;
+        attacker.smash = false;
         for (let i = 0; i < 8; i++) {
           particles.push({
             x: defender.x + defender.w / 2,
@@ -867,7 +1097,29 @@
       if (f.invuln > 0) f.invuln--;
       if (f.hitstun > 0) f.hitstun--;
       if (f.atkCool > 0) f.atkCool--;
+
+      const wasAtk = f.atkTimer > 0;
       if (f.atkTimer > 0) f.atkTimer--;
+      if (wasAtk && f.atkTimer <= 0) {
+        // Open combo window after light standing hits 1–2; reset after finisher / specials
+        if (f.atkKind === "attack1" || f.atkKind === "attack2") {
+          f.comboWindow = COMBO_WINDOW_FRAMES;
+        } else {
+          f.comboStep = 0;
+          f.comboWindow = 0;
+        }
+        f.atkKind = null;
+        f.smash = false;
+      }
+      if (f.comboWindow > 0) {
+        f.comboWindow--;
+        if (f.comboWindow <= 0) f.comboStep = 0;
+      }
+
+      // Stamina regen when not mid-swing (~20/sec → full in 5s)
+      if (f.atkTimer <= 0 && f.stamina < STAMINA_MAX) {
+        f.stamina = Math.min(STAMINA_MAX, f.stamina + STAMINA_REGEN_PER_SEC * SIM_DT);
+      }
 
       // ride moving platform before gravity integrate
       if (f.onGround && f.onPlat && f.onPlat.kind === "moving") {
@@ -966,8 +1218,16 @@
 
     function controlP1() {
       if (p1.hitstun > 0) return;
+      const down = keys["ArrowDown"] || keys["s"] || keys["S"];
+      p1.crouching = !!(p1.onGround && down && p1.atkTimer <= 0);
       const left = keys["ArrowLeft"] || keys["a"] || keys["A"];
       const right = keys["ArrowRight"] || keys["d"] || keys["D"];
+      if (p1.crouching) {
+        // Hold stance while crouching — still allow turn
+        if (left) p1.facing = -1;
+        if (right) p1.facing = 1;
+        return;
+      }
       const spd = p1.onGround ? p1.moveSpd : p1.airSpd;
       if (left) {
         p1.vx = -spd;
@@ -998,8 +1258,9 @@
         } else {
           f.facing = Math.sign(dx) || f.facing;
           if (aiState.cool <= 0) {
-            tryAttack(f, target.damage > 80 && Math.random() < 0.35);
-            aiState.cool = diff === "easy" ? 40 : diff === "hard" ? 18 : 28;
+            const wantHeavy = target.damage > 80 && Math.random() < 0.28 && f.stamina >= STAMINA_COST_HEAVY;
+            tryAttack(f, wantHeavy);
+            aiState.cool = diff === "easy" ? 36 : diff === "hard" ? 14 : 24;
           }
         }
       }
@@ -1331,6 +1592,7 @@
         pt.life--;
       }
       particles = particles.filter((p) => p.life > 0);
+      updateStaminaHud();
       updateAttackButtonCooldown();
       if (checkKO(p1, "p1") || checkKO(p2, "p2")) return;
     }
