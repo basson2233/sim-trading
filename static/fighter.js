@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018f";
+  const ASSET_VER = "20261018g";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018f";
+    const ASSET_VER = "20261018g";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -427,7 +427,9 @@
     const WALK_FRAMES = 6;
     const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
     const HEAVY_FRAMES = 4;
-    const HEAVY_ATK_FRAMES = 300; // 5s at 60Hz — charge/cast/aim/laser
+    const HEAVY_ATK_FRAMES = 180; // 3s at 60Hz — 4 frames × ~45 ticks; laser in last phase
+    const HEAVY_LASER_FRAMES = 60; // last 1s: beam active + drawn from character front
+    const HEAVY_REACH = 2000; // off-map horizontal beam
     const SIM_HZ = 60;
     const SIM_DT = 1 / SIM_HZ;
     const MAX_FRAME_DT = 0.05; // 50ms cap — avoid spiral after tab switch
@@ -524,6 +526,15 @@
         // Also keep legacy "attack" alias pointing at attack1 for any leftover refs
         sprites.p1.attack = sprites.p1.attack1;
         sprites.p2.attack = sprites.p2.attack1;
+        // Separate unidirectional laser beam (from character front → off-map)
+        const laserImg = await loadSpriteWithFallback(id, "heavy_laser_beam.png");
+        sprites.p1.heavy_laser = laserImg;
+        sprites.p2.heavy_laser = laserImg;
+        if (!(laserImg && laserImg.naturalWidth > 0)) {
+          const full = await loadSpriteWithFallback(id, "heavy_laser.png");
+          sprites.p1.heavy_laser = full;
+          sprites.p2.heavy_laser = full;
+        }
         spritesReady = SPRITE_KEYS.every(
           (k) => sprites.p1[k] && sprites.p1[k].naturalWidth > 0 && sprites.p2[k] && sprites.p2[k].naturalWidth > 0
         );
@@ -898,7 +909,7 @@
         f.stamina -= STAMINA_COST_HEAVY;
         f.smash = true;
         f.atkKind = "heavy";
-        f.atkTimer = HEAVY_ATK_FRAMES; // 5s laser sequence
+        f.atkTimer = HEAVY_ATK_FRAMES; // 3s heavy sequence (laser last 1s)
         f.atkConnected = false;
         f.atkCool = 0;
         f.comboStep = 0;
@@ -963,11 +974,11 @@
       let hh = 28;
       let smash = false;
       if (kind === "heavy") {
-        // Laser active on aim tip + beam frames (last ~90 of 300)
-        active = f.atkTimer <= 90 && f.atkTimer >= 1;
-        reach = 220; // long straight beam (~4× old heavy reach 52)
-        hy = f.y + 14;
-        hh = 24;
+        // Laser active in final phase (last HEAVY_LASER_FRAMES of 180)
+        active = f.atkTimer <= HEAVY_LASER_FRAMES && f.atkTimer >= 1;
+        reach = HEAVY_REACH; // thin beam from front to off-map
+        hy = f.y + 16;
+        hh = 22;
         smash = true;
       } else if (kind === "aerial_attack") {
         active = f.atkTimer <= 10 && f.atkTimer >= 4;
@@ -1009,8 +1020,8 @@
         box.y < defender.y + defender.h &&
         box.y + box.h > defender.y
       ) {
-        // Light base 8 (combo3 = 10); heavy = 4× light (32). Same ATK multiplier.
-        const base = box.smash ? 32 : box.kind === "attack3" ? 10 : box.kind === "aerial_attack" ? 9 : 8;
+        // Light base 8 (combo3 = 10); heavy = 5× light (40). Same ATK multiplier.
+        const base = box.smash ? 40 : box.kind === "attack3" ? 10 : box.kind === "aerial_attack" ? 9 : 8;
         const dmg = base * (0.7 + attacker.stats.atk / 100);
         defender.damage += dmg;
         const kb =
@@ -1027,7 +1038,7 @@
         defender.onPlat = null;
         if (box.smash) {
           attacker.atkConnected = true;
-          // Keep heavy animation running full HEAVY_ATK_FRAMES
+          // Keep heavy animation running full HEAVY_ATK_FRAMES (3s)
         } else if (attacker.atkKind === "attack1" || attacker.atkKind === "attack2") {
           attacker.comboWindow = COMBO_WINDOW_FRAMES;
           attacker.atkTimer = 0;
@@ -1222,7 +1233,7 @@
 
     function controlP1() {
       if (p1.hitstun > 0) return;
-      // Root during heavy laser cast (5s) — facing stays locked
+      // Root during heavy cast (3s) — facing stays locked
       if (p1.atkTimer > 0 && p1.atkKind === "heavy") return;
       const down = keys["ArrowDown"] || keys["s"] || keys["S"];
       p1.crouching = !!(p1.onGround && down && p1.atkTimer <= 0);
@@ -1498,6 +1509,33 @@
       ctx.closePath();
     }
 
+    function drawHeavyLaser(f) {
+      if (f.atkKind !== "heavy" || f.atkTimer <= 0 || f.atkTimer > HEAVY_LASER_FRAMES) return;
+      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const img = set.heavy_laser;
+      if (!(img && img.complete && img.naturalWidth > 0)) return;
+      const box = attackBox(f);
+      // Origin at character front (chest), beam extends facing direction off-map
+      const originX = f.facing > 0 ? f.x + f.w - 2 : f.x + 2;
+      const originY = f.y + f.h * 0.42;
+      const beamLen = HEAVY_REACH;
+      const beamH = 56;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.translate(originX, originY);
+      ctx.scale(f.facing >= 0 ? 1 : -1, 1);
+      // Soft pulse while laser is active
+      const t = 1 - f.atkTimer / HEAVY_LASER_FRAMES;
+      const pulse = 0.85 + 0.15 * Math.sin(t * Math.PI * 6);
+      ctx.globalAlpha = 0.55 + 0.35 * pulse;
+      ctx.drawImage(img, 0, -beamH / 2, beamLen, beamH);
+      ctx.globalAlpha = 0.35 * pulse;
+      ctx.drawImage(img, 0, -beamH * 0.7, beamLen, beamH * 1.4);
+      ctx.restore();
+      // Optional: thin debug-free hit feel — skip stroke for smash when laser art is up
+      void box;
+    }
+
     function drawFighter(f) {
       const blink = f.invuln > 0 && Math.floor(f.invuln / 3) % 2 === 0;
       if (blink) return;
@@ -1568,18 +1606,23 @@
         ctx.fill();
       }
 
+      // Heavy laser beam from character front → off-map (last HEAVY_LASER_FRAMES)
+      drawHeavyLaser(f);
+
       if (f.damage > 60) {
         ctx.strokeStyle = `rgba(251,191,36,${Math.min(0.8, f.damage / 200)})`;
         ctx.lineWidth = 2;
         ctx.strokeRect(f.x - 4, f.y - 8, f.w + 8, f.h + 10);
       }
-      // subtle attack arc (hitbox already has FX in attack sprite)
+      // subtle attack arc (skip smash — laser art covers it)
       const box = attackBox(f);
-      if (box && !(img && img.complete)) {
-        ctx.fillStyle = box.smash ? "rgba(251,191,36,.55)" : "rgba(255,255,255,.4)";
+      if (box && box.smash) {
+        // laser visual only
+      } else if (box && !(img && img.complete)) {
+        ctx.fillStyle = "rgba(255,255,255,.4)";
         ctx.fillRect(box.x, box.y, box.w, box.h);
       } else if (box) {
-        ctx.strokeStyle = box.smash ? "rgba(251,191,36,.45)" : "rgba(196,181,253,.35)";
+        ctx.strokeStyle = "rgba(196,181,253,.35)";
         ctx.lineWidth = 1.5;
         ctx.strokeRect(box.x, box.y, box.w, box.h);
       }
