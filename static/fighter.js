@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018i";
+  const ASSET_VER = "20261018j";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018i";
+    const ASSET_VER = "20261018j";
     const SPRITE_KEYS = [
       "idle",
       "walk",
