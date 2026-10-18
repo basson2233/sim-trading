@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018p";
+  const ASSET_VER = "20261018q";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018p";
+    const ASSET_VER = "20261018q";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -432,7 +432,11 @@
     const HEAVY_FRAMES = 4;
     const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
     const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
-    const CROUCH_AERIAL_ATK_DURATION = 36; // 0.6s @60Hz — 3 frames × 0.2s (12 ticks)
+    const CROUCH_ATK_FRAMES = 4; // crouch strip: windup + 3 active/recovery (was 3, +1)
+    const CROUCH_ATK_DURATION = 180; // 3s @60Hz — 4 frames × 45 ticks (0.75s each)
+    const CROUCH_AERIAL_ATK_DURATION = 36; // aerial stays 0.6s — 3 frames × 0.2s
+    const CROUCH_FX_SIDE = 288; // square VFX/hitbox: 3× prior crouch reach (96)
+    const CROUCH_FX_AHEAD = 2; // place FX center ~2 character widths ahead of front
     const HEAVY_ATK_FRAMES = 180; // 3s at 60Hz — 4 frames × ~45 ticks; laser in last phase
     const HEAVY_LASER_FRAMES = 60; // last 1s: beam active + drawn from character front
     const HEAVY_REACH = 2000; // off-map horizontal beam
@@ -442,6 +446,7 @@
     const STAMINA_MAX = 100;
     const STAMINA_REGEN_PER_SEC = 20; // full bar in 5s when idle
     const STAMINA_COST_NORMAL = 20;
+    const STAMINA_COST_CROUCH = 50; // crouch attack stamina
     const STAMINA_COST_HEAVY = 99;
     const COMBO_WINDOW_FRAMES = 36;
     const RUN_TAP_WINDOW_MS = 300; // double-tap ←/→ or A/D within 0.3s to run
@@ -543,6 +548,10 @@
           sprites.p1.heavy_laser = full;
           sprites.p2.heavy_laser = full;
         }
+        // Separate crouch-attack VFX overlay (not part of character strip)
+        const crouchFx = await loadSpriteWithFallback(id, "crouch_fx.png");
+        sprites.p1.crouch_fx = crouchFx;
+        sprites.p2.crouch_fx = crouchFx;
         spritesReady = SPRITE_KEYS.every(
           (k) => sprites.p1[k] && sprites.p1[k].naturalWidth > 0 && sprites.p2[k] && sprites.p2[k].naturalWidth > 0
         );
@@ -984,10 +993,9 @@
         return true;
       }
 
-      if (f.stamina < STAMINA_COST_NORMAL) return false;
-
       // Aerial light
       if (!f.onGround) {
+        if (f.stamina < STAMINA_COST_NORMAL) return false;
         f.stamina -= STAMINA_COST_NORMAL;
         f.smash = false;
         f.atkKind = "aerial_attack";
@@ -1004,11 +1012,13 @@
       // Crouch light (hold ↓ / S on ground) — read keys too so same-frame ↓+Z works
       const holdDown = !f.isAI && (keys["ArrowDown"] || keys["s"] || keys["S"]);
       if (f.onGround && (f.crouching || holdDown)) {
-        f.stamina -= STAMINA_COST_NORMAL;
+        if (f.stamina < STAMINA_COST_CROUCH) return false;
+        f.stamina -= STAMINA_COST_CROUCH;
         f.smash = false;
         f.atkKind = "crouch_attack";
-        f.atkTimer = CROUCH_AERIAL_ATK_DURATION; // 3 frames × 0.2s
+        f.atkTimer = CROUCH_ATK_DURATION; // 3s — 4 frames × 0.75s
         f.atkDuration = f.atkTimer;
+        f.atkConnected = false; // one connect; keep full 3s anim + VFX
         f.atkCool = 0;
         f.comboStep = 0;
         f.comboWindow = 0;
@@ -1016,6 +1026,8 @@
         updateAttackButtonCooldown();
         return true;
       }
+
+      if (f.stamina < STAMINA_COST_NORMAL) return false;
 
       // Standing 3-hit combo
       f.stamina -= STAMINA_COST_NORMAL;
@@ -1056,11 +1068,16 @@
         hy = f.y + 4;
         hh = 36;
       } else if (kind === "crouch_attack") {
-        // 3×0.2s strip; hit active from frame 2 onward (same as aerial)
-        active = f.atkTimer <= 24 && f.atkTimer >= 1;
-        reach = 96;
-        hy = f.y + f.h - 28;
-        hh = 28;
+        // 4 frames × 0.75s over 3s; hit active from frame 2+ (skip windup)
+        // atkTimer from 180: frame2 starts at elapsed 45 → atkTimer <= 135
+        active = f.atkTimer <= 135 && f.atkTimer >= 1;
+        // Square 3× prior reach (96→288), center ~2 char widths ahead of front
+        reach = CROUCH_FX_SIDE;
+        hh = CROUCH_FX_SIDE;
+        const ahead = CROUCH_FX_AHEAD * f.w;
+        const cx = f.facing > 0 ? f.x + f.w + ahead : f.x - ahead;
+        hy = f.y + f.h - CROUCH_FX_SIDE * 0.85;
+        f._crouchFxCx = cx;
       } else if (kind === "attack2") {
         // Middle third of strip (frame 2 / slash)
         active = f.atkTimer <= 12 && f.atkTimer >= 7;
@@ -1076,7 +1093,12 @@
         reach = 80;
       }
       if (!active) return null;
-      const hx = f.facing > 0 ? f.x + f.w - 4 : f.x - reach + 4;
+      let hx;
+      if (kind === "crouch_attack" && f._crouchFxCx != null) {
+        hx = f._crouchFxCx - reach / 2;
+      } else {
+        hx = f.facing > 0 ? f.x + f.w - 4 : f.x - reach + 4;
+      }
       return { x: hx, y: hy, w: reach, h: hh, smash, kind };
     }
 
@@ -1084,8 +1106,8 @@
       if (defender.invuln > 0 || defender.hitstun > 0) return;
       const box = attackBox(attacker);
       if (!box) return;
-      // Heavy laser: one connect per swing (animation keeps playing full 5s)
-      if (box.smash && attacker.atkConnected) return;
+      // Heavy laser / crouch: one connect per swing (animation keeps playing)
+      if ((box.smash || box.kind === "crouch_attack") && attacker.atkConnected) return;
       if (
         box.x < defender.x + defender.w &&
         box.x + box.w > defender.x &&
@@ -1111,6 +1133,8 @@
         if (box.smash) {
           attacker.atkConnected = true;
           // Keep heavy animation running full HEAVY_ATK_FRAMES (3s)
+        } else if (attacker.atkKind === "crouch_attack") {
+          attacker.atkConnected = true; // one hit; keep 3s strip + VFX playing
         } else if (attacker.atkKind === "attack1" || attacker.atkKind === "attack2") {
           attacker.comboWindow = COMBO_WINDOW_FRAMES;
           attacker.atkTimer = 0;
@@ -1617,6 +1641,34 @@
       void box;
     }
 
+    function drawCrouchFx(f) {
+      // Separate purple energy VFX overlay — NOT part of character strip
+      if (f.atkKind !== "crouch_attack" || f.atkTimer <= 0) return;
+      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const img = set.crouch_fx;
+      if (!(img && img.complete && img.naturalWidth > 0)) return;
+      const ahead = CROUCH_FX_AHEAD * f.w;
+      const side = CROUCH_FX_SIDE;
+      const cx = f.facing > 0 ? f.x + f.w + ahead : f.x - ahead;
+      // Ground-anchored vertical blast: bottom near feet
+      const feetY = f.y + f.h;
+      const top = feetY - side * 0.85;
+      const dur = f.atkDuration || CROUCH_ATK_DURATION;
+      const t = 1 - f.atkTimer / dur;
+      // Fade in on frame1, full during active, soft fade at end
+      let alpha = 0.9;
+      if (t < 0.12) alpha = 0.25 + 0.65 * (t / 0.12);
+      else if (t > 0.85) alpha = 0.9 * (1 - (t - 0.85) / 0.15);
+      const pulse = 0.92 + 0.08 * Math.sin(t * Math.PI * 4);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = alpha * pulse;
+      ctx.drawImage(img, cx - side / 2, top, side, side);
+      ctx.globalAlpha = alpha * 0.35 * pulse;
+      ctx.drawImage(img, cx - side * 0.55, top - side * 0.05, side * 1.1, side * 1.1);
+      ctx.restore();
+    }
+
     function drawFighter(f) {
       const blink = f.invuln > 0 && Math.floor(f.invuln / 3) % 2 === 0;
       if (blink) return;
@@ -1675,13 +1727,14 @@
           // Laser frame is wide — keep aspect; slightly larger draw for beam readability
           drawW = (srcW / srcH) * drawH;
         } else if (isLightStrip) {
-          srcW = img.naturalWidth / ATTACK_FRAMES;
+          const stripFrames = key === "crouch_attack" ? CROUCH_ATK_FRAMES : ATTACK_FRAMES;
+          srcW = img.naturalWidth / stripFrames;
           srcH = img.naturalHeight;
           const dur = f.atkDuration || LIGHT_ATK_DURATION;
           const elapsed = Math.max(0, dur - f.atkTimer);
           const frameIdx = Math.min(
-            ATTACK_FRAMES - 1,
-            Math.floor(elapsed / (dur / ATTACK_FRAMES))
+            stripFrames - 1,
+            Math.floor(elapsed / (dur / stripFrames))
           );
           srcX = frameIdx * srcW;
           srcY = 0;
@@ -1720,6 +1773,8 @@
 
       // Heavy laser beam from character front → off-map (last HEAVY_LASER_FRAMES)
       drawHeavyLaser(f);
+      // Crouch purple energy VFX ~2 char widths ahead (separate overlay)
+      drawCrouchFx(f);
 
       if (f.damage > 60) {
         ctx.strokeStyle = `rgba(251,191,36,${Math.min(0.8, f.damage / 200)})`;
@@ -1733,6 +1788,8 @@
       } else if (box && !(img && img.complete)) {
         ctx.fillStyle = "rgba(255,255,255,.4)";
         ctx.fillRect(box.x, box.y, box.w, box.h);
+      } else if (box && box.kind === "crouch_attack") {
+        // VFX art covers the square — skip debug stroke
       } else if (box) {
         ctx.strokeStyle = "rgba(196,181,253,.35)";
         ctx.lineWidth = 1.5;
