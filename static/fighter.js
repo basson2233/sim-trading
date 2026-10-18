@@ -213,25 +213,13 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018b";
+  const ASSET_VER = "20261018c";
   const CHARACTERS = [
     {
       id: "herta",
       name: "大黑塔",
       tag: "法師・預設",
       portrait: `/static/fighter/sprites/herta/portrait.png?v=${ASSET_VER}`,
-    },
-    {
-      id: "golden_bull",
-      name: "金牛",
-      tag: "多頭・攻勢",
-      portrait: `/static/fighter/sprites/golden_bull/portrait.png?v=${ASSET_VER}`,
-    },
-    {
-      id: "short_bear",
-      name: "空頭熊",
-      tag: "空頭・重擊",
-      portrait: `/static/fighter/sprites/short_bear/portrait.png?v=${ASSET_VER}`,
     },
   ];
   let selectedCharId = "herta";
@@ -415,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018b";
+    const ASSET_VER = "20261018c";
     const SPRITE_KEYS = [
       "idle",
       "walk",
