@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018n";
+  const ASSET_VER = "20261018o";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018n";
+    const ASSET_VER = "20261018o";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -427,6 +427,8 @@
     };
     const WALK_FRAMES = 6;
     const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
+    const RUN_FRAMES = 9;
+    const RUN_FRAME_TICKS = 6; // 10 fps at 60Hz — smooth loop for 9-frame run
     const HEAVY_FRAMES = 4;
     const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
     const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
@@ -1626,10 +1628,13 @@
       const feetY = f.y + f.h;
       // Visual taller than hitbox; feet stay on hitbox bottom
       const drawH = 118;
-      const runBob = key === "run" ? Math.sin(tick / 3.5) * 3.5 : 0;
+      const isRunKey = key === "run";
       let drawW = drawH;
       const ok = !!(img && img.complete && img.naturalWidth > 0);
       const isWalkStrip = key === "walk" && ok && img.naturalWidth >= img.naturalHeight * 2;
+      const isRunStrip = isRunKey && ok && img.naturalWidth >= img.naturalHeight * 2;
+      // Single-frame run fallback still gets a light bob; multi-frame strip does not
+      const runBob = isRunKey && !isRunStrip ? Math.sin(tick / 3.5) * 3.5 : 0;
       const isHeavyStrip =
         key === "heavy" && ok && img.naturalWidth >= img.naturalHeight * 2 && f.atkTimer > 0;
       const isLightStrip =
@@ -1649,6 +1654,12 @@
           srcW = img.naturalWidth / WALK_FRAMES;
           srcH = img.naturalHeight;
           srcX = (Math.floor(tick / WALK_FRAME_TICKS) % WALK_FRAMES) * srcW;
+          srcY = 0;
+          drawW = (srcW / srcH) * drawH;
+        } else if (isRunStrip) {
+          srcW = img.naturalWidth / RUN_FRAMES;
+          srcH = img.naturalHeight;
+          srcX = (Math.floor(tick / RUN_FRAME_TICKS) % RUN_FRAMES) * srcW;
           srcY = 0;
           drawW = (srcW / srcH) * drawH;
         } else if (isHeavyStrip) {
@@ -1692,8 +1703,8 @@
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
-        const dy = -drawH + runBob; // slight vertical bounce for single-frame run
-        if (isWalkStrip || isHeavyStrip || isLightStrip) {
+        const dy = -drawH + runBob; // bob only for single-frame run fallback
+        if (isWalkStrip || isRunStrip || isHeavyStrip || isLightStrip) {
           ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, dy, drawW, drawH);
         } else {
           ctx.drawImage(img, -drawW / 2, dy, drawW, drawH);
