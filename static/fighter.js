@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018k";
+  const ASSET_VER = "20261018l";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018k";
+    const ASSET_VER = "20261018l";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -429,6 +429,7 @@
     const HEAVY_FRAMES = 4;
     const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
     const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
+    const CROUCH_AERIAL_ATK_DURATION = 90; // 1.5s @60Hz — 3 frames × 0.5s (30 ticks)
     const HEAVY_ATK_FRAMES = 180; // 3s at 60Hz — 4 frames × ~45 ticks; laser in last phase
     const HEAVY_LASER_FRAMES = 60; // last 1s: beam active + drawn from character front
     const HEAVY_REACH = 2000; // off-map horizontal beam
@@ -931,7 +932,7 @@
         f.stamina -= STAMINA_COST_NORMAL;
         f.smash = false;
         f.atkKind = "aerial_attack";
-        f.atkTimer = LIGHT_ATK_DURATION; // 3-frame strip like light attacks
+        f.atkTimer = CROUCH_AERIAL_ATK_DURATION; // 3 frames × 0.5s
         f.atkDuration = f.atkTimer;
         f.atkCool = 0;
         f.comboStep = 0;
@@ -947,7 +948,8 @@
         f.stamina -= STAMINA_COST_NORMAL;
         f.smash = false;
         f.atkKind = "crouch_attack";
-        f.atkTimer = 12;
+        f.atkTimer = CROUCH_AERIAL_ATK_DURATION; // 3 frames × 0.5s
+        f.atkDuration = f.atkTimer;
         f.atkCool = 0;
         f.comboStep = 0;
         f.comboWindow = 0;
@@ -988,14 +990,14 @@
         hh = 22;
         smash = true;
       } else if (kind === "aerial_attack") {
-        // Middle third of 3-frame aerial spin strip
-        active = f.atkTimer <= 12 && f.atkTimer >= 7;
+        // Middle frame (0.5s) of 1.5s / 3-frame aerial strip
+        active = f.atkTimer <= 60 && f.atkTimer >= 31;
         reach = 86;
         hy = f.y + 4;
         hh = 36;
       } else if (kind === "crouch_attack") {
-        // Middle third of 3-frame ground magic strip
-        active = f.atkTimer <= 12 && f.atkTimer >= 7;
+        // Middle frame (0.5s) of 1.5s / 3-frame crouch strip
+        active = f.atkTimer <= 60 && f.atkTimer >= 31;
         reach = 96;
         hy = f.y + f.h - 28;
         hh = 28;
@@ -1569,8 +1571,7 @@
           key === "crouch_attack" ||
           key === "aerial_attack") &&
         ok &&
-        img.naturalWidth >= img.naturalHeight * 2 &&
-        f.atkTimer > 0;
+        f.atkTimer > 0; // always 3-frame L→R strips — crop by frameIdx, never draw whole sheet
       let srcX = 0,
         srcY = 0,
         srcW = 0,
