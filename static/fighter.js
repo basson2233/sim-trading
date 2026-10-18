@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018m";
+  const ASSET_VER = "20261018n";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,10 +403,11 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018m";
+    const ASSET_VER = "20261018n";
     const SPRITE_KEYS = [
       "idle",
       "walk",
+      "run",
       "attack1",
       "attack2",
       "attack3",
@@ -440,7 +441,9 @@
     const STAMINA_REGEN_PER_SEC = 20; // full bar in 5s when idle
     const STAMINA_COST_NORMAL = 20;
     const STAMINA_COST_HEAVY = 99;
-    const COMBO_WINDOW_FRAMES = 36; // 0.6s at 60Hz to chain next hit
+    const COMBO_WINDOW_FRAMES = 36;
+    const RUN_TAP_WINDOW_MS = 300; // double-tap ←/→ or A/D within 0.3s to run
+    const RUN_SPD_MULT = 1.85; // run vs walk speed // 0.6s at 60Hz to chain next hit
     const sprites = { p1: {}, p2: {} };
     let spritesReady = false;
     let spritesFailed = 0;
@@ -556,6 +559,7 @@
         return f.smash ? "heavy" : "attack1";
       }
       if (!f.onGround) return "jump";
+      if (f.running && Math.abs(f.vx) > 0.5) return "run";
       if (Math.abs(f.vx) > 0.35) return "walk";
       return "idle";
     }
@@ -563,6 +567,7 @@
     let running = false;
     let raf = 0;
     let keys = {};
+    let lastMoveTap = { dir: 0, t: 0 }; // double-tap run: dir -1|1, t = performance.now()
     let p1, p2, stocks, roundLock, kosToWin;
     let matchMeta = null;
     let particles = [];
@@ -629,6 +634,8 @@
         comboStep: 0, // 0 = next light is attack1
         comboWindow: 0,
         crouching: false,
+        running: false,
+        runDir: 0,
         hitstun: 0,
         invuln: 0,
         isAI: !!isAI,
@@ -662,6 +669,8 @@
       p1.comboStep = 0;
       p1.comboWindow = 0;
       p1.crouching = false;
+      p1.running = false;
+      p1.runDir = 0;
       p2.x = mapState.spawn.p2x;
       p2.y = gy - p2.h;
       p2.vx = p2.vy = 0;
@@ -681,6 +690,8 @@
       p2.comboStep = 0;
       p2.comboWindow = 0;
       p2.crouching = false;
+      p2.running = false;
+      p2.runDir = 0;
       particles = [];
       updateHud();
     }
@@ -750,6 +761,38 @@
       updateAttackButtonCooldown();
     }
 
+    function moveDirFromKey(k) {
+      if (k === "ArrowLeft" || k === "a" || k === "A") return -1;
+      if (k === "ArrowRight" || k === "d" || k === "D") return 1;
+      return 0;
+    }
+
+    function noteMoveTap(dir) {
+      if (!dir || !p1) return;
+      const now = performance.now();
+      if (lastMoveTap.dir === dir && now - lastMoveTap.t <= RUN_TAP_WINDOW_MS) {
+        p1.running = true;
+        p1.runDir = dir;
+        p1.facing = dir;
+      }
+      lastMoveTap = { dir, t: now };
+    }
+
+    function stopRunIfNeeded(dirHeldLeft, dirHeldRight) {
+      if (!p1 || !p1.running) return;
+      // Opposite direction cancels run
+      if ((p1.runDir < 0 && dirHeldRight) || (p1.runDir > 0 && dirHeldLeft)) {
+        p1.running = false;
+        p1.runDir = 0;
+        return;
+      }
+      // Release of run direction cancels
+      if ((p1.runDir < 0 && !dirHeldLeft) || (p1.runDir > 0 && !dirHeldRight)) {
+        p1.running = false;
+        p1.runDir = 0;
+      }
+    }
+
     function onKey(e, down) {
       const k = e.key;
       if (
@@ -779,6 +822,12 @@
       }
       keys[k] = down;
       if (!running || !p1) return;
+      const md = moveDirFromKey(k);
+      if (down && md) noteMoveTap(md);
+      if (!down && md && p1.running && p1.runDir === md) {
+        p1.running = false;
+        p1.runDir = 0;
+      }
       if (down && (k === "z" || k === "Z" || k === " " || k === "j" || k === "J")) {
         tryAttack(p1, false); // light / crouch / aerial (context from stance)
       }
@@ -828,7 +877,15 @@
     }
 
     function setHeldKey(code, down) {
+      const was = !!keys[code];
       keys[code] = !!down;
+      if (!running || !p1) return;
+      const md = moveDirFromKey(code);
+      if (down && !was && md) noteMoveTap(md);
+      if (!down && md && p1.running && p1.runDir === md) {
+        p1.running = false;
+        p1.runDir = 0;
+      }
     }
 
     function bindVirtPad() {
@@ -1254,11 +1311,16 @@
       const right = keys["ArrowRight"] || keys["d"] || keys["D"];
       if (p1.crouching) {
         // Hold stance while crouching — still allow turn
+        p1.running = false;
+        p1.runDir = 0;
         if (left) p1.facing = -1;
         if (right) p1.facing = 1;
         return;
       }
-      const spd = p1.onGround ? p1.moveSpd : p1.airSpd;
+      stopRunIfNeeded(!!left, !!right);
+      // Run only grounded; keep flag in air until key release / opposite
+      const base = p1.onGround ? p1.moveSpd : p1.airSpd;
+      const spd = p1.running && p1.onGround ? base * RUN_SPD_MULT : base;
       if (left) {
         p1.vx = -spd;
         p1.facing = -1;
@@ -1266,6 +1328,10 @@
       if (right) {
         p1.vx = spd;
         p1.facing = 1;
+      }
+      if (!left && !right && p1.running) {
+        p1.running = false;
+        p1.runDir = 0;
       }
     }
 
@@ -1560,6 +1626,7 @@
       const feetY = f.y + f.h;
       // Visual taller than hitbox; feet stay on hitbox bottom
       const drawH = 118;
+      const runBob = key === "run" ? Math.sin(tick / 3.5) * 3.5 : 0;
       let drawW = drawH;
       const ok = !!(img && img.complete && img.naturalWidth > 0);
       const isWalkStrip = key === "walk" && ok && img.naturalWidth >= img.naturalHeight * 2;
@@ -1625,10 +1692,11 @@
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
+        const dy = -drawH + runBob; // slight vertical bounce for single-frame run
         if (isWalkStrip || isHeavyStrip || isLightStrip) {
-          ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, -drawH, drawW, drawH);
+          ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, dy, drawW, drawH);
         } else {
-          ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
+          ctx.drawImage(img, -drawW / 2, dy, drawW, drawH);
         }
         ctx.restore();
       } else {
