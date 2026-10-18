@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018j";
+  const ASSET_VER = "20261018k";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018j";
+    const ASSET_VER = "20261018k";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -994,10 +994,11 @@
         hy = f.y + 4;
         hh = 36;
       } else if (kind === "crouch_attack") {
-        active = f.atkTimer <= 8 && f.atkTimer >= 3;
-        reach = 70;
-        hy = f.y + f.h - 22;
-        hh = 20;
+        // Middle third of 3-frame ground magic strip
+        active = f.atkTimer <= 12 && f.atkTimer >= 7;
+        reach = 96;
+        hy = f.y + f.h - 28;
+        hh = 28;
       } else if (kind === "attack2") {
         // Middle third of strip (frame 2 / slash)
         active = f.atkTimer <= 12 && f.atkTimer >= 7;
@@ -1565,6 +1566,7 @@
         (key === "attack1" ||
           key === "attack2" ||
           key === "attack3" ||
+          key === "crouch_attack" ||
           key === "aerial_attack") &&
         ok &&
         img.naturalWidth >= img.naturalHeight * 2 &&
