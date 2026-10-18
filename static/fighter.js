@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018g";
+  const ASSET_VER = "20261018h";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018g";
+    const ASSET_VER = "20261018h";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -427,6 +427,8 @@
     const WALK_FRAMES = 6;
     const WALK_FRAME_TICKS = 7; // ~8.5 fps at fixed 60Hz sim
     const HEAVY_FRAMES = 4;
+    const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
+    const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
     const HEAVY_ATK_FRAMES = 180; // 3s at 60Hz — 4 frames × ~45 ticks; laser in last phase
     const HEAVY_LASER_FRAMES = 60; // last 1s: beam active + drawn from character front
     const HEAVY_REACH = 2000; // off-map horizontal beam
@@ -617,6 +619,7 @@
         onPlat: null,
         jumps: 2,
         atkTimer: 0,
+        atkDuration: 0,
         atkCool: 0, // unused (kept for compat); stamina gates attacks now
         atkKind: null, // attack1|attack2|attack3|crouch_attack|aerial_attack|heavy
         atkConnected: false, // heavy laser hits once per swing
@@ -650,6 +653,7 @@
       p1.hitstun = 0;
       p1.invuln = 45;
       p1.atkTimer = p1.atkCool = 0;
+      p1.atkDuration = 0;
       p1.atkKind = null;
       p1.atkConnected = false;
       p1.smash = false;
@@ -668,6 +672,7 @@
       p2.hitstun = 0;
       p2.invuln = 45;
       p2.atkTimer = p2.atkCool = 0;
+      p2.atkDuration = 0;
       p2.atkKind = null;
       p2.atkConnected = false;
       p2.smash = false;
@@ -956,8 +961,9 @@
       f.comboStep = Math.min(3, (f.comboStep || 0) + 1);
       f.smash = false;
       f.atkKind = "attack" + f.comboStep;
-      // Slightly longer active on finisher
-      f.atkTimer = f.comboStep === 3 ? 16 : f.comboStep === 2 ? 13 : 12;
+      // 3-frame strip per swing; finisher slightly longer so recovery frame reads
+      f.atkTimer = f.comboStep === 3 ? 21 : LIGHT_ATK_DURATION;
+      f.atkDuration = f.atkTimer;
       f.atkCool = 0;
       f.comboWindow = 0; // re-armed when this swing ends
       updateStaminaHud();
@@ -991,16 +997,17 @@
         hy = f.y + f.h - 22;
         hh = 20;
       } else if (kind === "attack2") {
-        active = f.atkTimer <= 9 && f.atkTimer >= 3;
+        // Middle third of strip (frame 2 / slash)
+        active = f.atkTimer <= 12 && f.atkTimer >= 7;
         reach = 84;
         hh = 30;
       } else if (kind === "attack3") {
-        active = f.atkTimer <= 11 && f.atkTimer >= 4;
+        active = f.atkTimer <= 14 && f.atkTimer >= 8;
         reach = 92;
         hh = 32;
       } else {
-        // attack1
-        active = f.atkTimer <= 8 && f.atkTimer >= 3;
+        // attack1 — thrust active on frame 2
+        active = f.atkTimer <= 12 && f.atkTimer >= 7;
         reach = 80;
       }
       if (!active) return null;
@@ -1552,6 +1559,11 @@
       const isWalkStrip = key === "walk" && ok && img.naturalWidth >= img.naturalHeight * 2;
       const isHeavyStrip =
         key === "heavy" && ok && img.naturalWidth >= img.naturalHeight * 2 && f.atkTimer > 0;
+      const isLightStrip =
+        (key === "attack1" || key === "attack2" || key === "attack3") &&
+        ok &&
+        img.naturalWidth >= img.naturalHeight * 2 &&
+        f.atkTimer > 0;
       let srcX = 0,
         srcY = 0,
         srcW = 0,
@@ -1575,6 +1587,18 @@
           srcY = 0;
           // Laser frame is wide — keep aspect; slightly larger draw for beam readability
           drawW = (srcW / srcH) * drawH;
+        } else if (isLightStrip) {
+          srcW = img.naturalWidth / ATTACK_FRAMES;
+          srcH = img.naturalHeight;
+          const dur = f.atkDuration || LIGHT_ATK_DURATION;
+          const elapsed = Math.max(0, dur - f.atkTimer);
+          const frameIdx = Math.min(
+            ATTACK_FRAMES - 1,
+            Math.floor(elapsed / (dur / ATTACK_FRAMES))
+          );
+          srcX = frameIdx * srcW;
+          srcY = 0;
+          drawW = (srcW / srcH) * drawH;
         } else {
           drawW = (img.naturalWidth / img.naturalHeight) * drawH;
         }
@@ -1592,7 +1616,7 @@
         ctx.save();
         ctx.translate(cx, feetY);
         ctx.scale(f.facing >= 0 ? 1 : -1, 1);
-        if (isWalkStrip || isHeavyStrip) {
+        if (isWalkStrip || isHeavyStrip || isLightStrip) {
           ctx.drawImage(img, srcX, srcY, srcW, srcH, -drawW / 2, -drawH, drawW, drawH);
         } else {
           ctx.drawImage(img, -drawW / 2, -drawH, drawW, drawH);
