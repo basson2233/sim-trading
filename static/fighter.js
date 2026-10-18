@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018q";
+  const ASSET_VER = "20261018r";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018q";
+    const ASSET_VER = "20261018r";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -432,8 +432,11 @@
     const HEAVY_FRAMES = 4;
     const ATTACK_FRAMES = 3; // light combo sheets are 3-frame horizontal strips
     const LIGHT_ATK_DURATION = 18; // 0.3s @60Hz — 3 frames × 6 ticks
-    const CROUCH_ATK_FRAMES = 4; // crouch strip: windup + 3 active/recovery (was 3, +1)
-    const CROUCH_ATK_DURATION = 180; // 3s @60Hz — 4 frames × 45 ticks (0.75s each)
+    const CROUCH_ATK_FRAMES = 4; // crouch strip: windup + mid + impact + hold
+    const CROUCH_CHAR_FRAME_TICKS = 45; // 0.75s per char frame (frames 1–3; frame 4 holds during FX)
+    const CROUCH_FX_START = 3 * CROUCH_CHAR_FRAME_TICKS; // after frame 3 finishes (elapsed 135)
+    const CROUCH_FX_DURATION = 60; // VFX alone 1s @60Hz
+    const CROUCH_ATK_DURATION = CROUCH_FX_START + CROUCH_FX_DURATION; // 195: strip then 1s FX
     const CROUCH_AERIAL_ATK_DURATION = 36; // aerial stays 0.6s — 3 frames × 0.2s
     const CROUCH_FX_SIDE = 288; // square VFX/hitbox: 3× prior crouch reach (96)
     const CROUCH_FX_AHEAD = 2; // place FX center ~2 character widths ahead of front
@@ -1016,7 +1019,7 @@
         f.stamina -= STAMINA_COST_CROUCH;
         f.smash = false;
         f.atkKind = "crouch_attack";
-        f.atkTimer = CROUCH_ATK_DURATION; // 3s — 4 frames × 0.75s
+        f.atkTimer = CROUCH_ATK_DURATION; // frames 1–3 then 1s VFX (after frame 3)
         f.atkDuration = f.atkTimer;
         f.atkConnected = false; // one connect; keep full 3s anim + VFX
         f.atkCool = 0;
@@ -1068,9 +1071,12 @@
         hy = f.y + 4;
         hh = 36;
       } else if (kind === "crouch_attack") {
-        // 4 frames × 0.75s over 3s; hit active from frame 2+ (skip windup)
-        // atkTimer from 180: frame2 starts at elapsed 45 → atkTimer <= 135
-        active = f.atkTimer <= 135 && f.atkTimer >= 1;
+        // Big square hit only while separate VFX plays (after frame 3, 1s)
+        const elapsed = (f.atkDuration || CROUCH_ATK_DURATION) - f.atkTimer;
+        active =
+          elapsed >= CROUCH_FX_START &&
+          elapsed < CROUCH_FX_START + CROUCH_FX_DURATION &&
+          f.atkTimer >= 1;
         // Square 3× prior reach (96→288), center ~2 char widths ahead of front
         reach = CROUCH_FX_SIDE;
         hh = CROUCH_FX_SIDE;
@@ -1642,24 +1648,24 @@
     }
 
     function drawCrouchFx(f) {
-      // Separate purple energy VFX overlay — NOT part of character strip
+      // Separate VFX: only AFTER character frame 3 finishes, then alone for 1s
       if (f.atkKind !== "crouch_attack" || f.atkTimer <= 0) return;
+      const dur = f.atkDuration || CROUCH_ATK_DURATION;
+      const elapsed = Math.max(0, dur - f.atkTimer);
+      if (elapsed < CROUCH_FX_START || elapsed >= CROUCH_FX_START + CROUCH_FX_DURATION) return;
       const set = f.isAI ? sprites.p2 : sprites.p1;
       const img = set.crouch_fx;
       if (!(img && img.complete && img.naturalWidth > 0)) return;
       const ahead = CROUCH_FX_AHEAD * f.w;
       const side = CROUCH_FX_SIDE;
       const cx = f.facing > 0 ? f.x + f.w + ahead : f.x - ahead;
-      // Ground-anchored vertical blast: bottom near feet
       const feetY = f.y + f.h;
       const top = feetY - side * 0.85;
-      const dur = f.atkDuration || CROUCH_ATK_DURATION;
-      const t = 1 - f.atkTimer / dur;
-      // Fade in on frame1, full during active, soft fade at end
-      let alpha = 0.9;
-      if (t < 0.12) alpha = 0.25 + 0.65 * (t / 0.12);
-      else if (t > 0.85) alpha = 0.9 * (1 - (t - 0.85) / 0.15);
-      const pulse = 0.92 + 0.08 * Math.sin(t * Math.PI * 4);
+      const localT = (elapsed - CROUCH_FX_START) / CROUCH_FX_DURATION; // 0→1 over the 1s
+      let alpha = 0.95;
+      if (localT < 0.1) alpha = 0.3 + 0.65 * (localT / 0.1);
+      else if (localT > 0.8) alpha = 0.95 * (1 - (localT - 0.8) / 0.2);
+      const pulse = 0.92 + 0.08 * Math.sin(localT * Math.PI * 4);
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = alpha * pulse;
@@ -1732,10 +1738,19 @@
           srcH = img.naturalHeight;
           const dur = f.atkDuration || LIGHT_ATK_DURATION;
           const elapsed = Math.max(0, dur - f.atkTimer);
-          const frameIdx = Math.min(
-            stripFrames - 1,
-            Math.floor(elapsed / (dur / stripFrames))
-          );
+          let frameIdx;
+          if (key === "crouch_attack") {
+            // Frames 1–3 at CROUCH_CHAR_FRAME_TICKS; frame 4 holds through post-frame3 VFX
+            frameIdx = Math.min(
+              CROUCH_ATK_FRAMES - 1,
+              Math.floor(elapsed / CROUCH_CHAR_FRAME_TICKS)
+            );
+          } else {
+            frameIdx = Math.min(
+              stripFrames - 1,
+              Math.floor(elapsed / (dur / stripFrames))
+            );
+          }
           srcX = frameIdx * srcW;
           srcY = 0;
           drawW = (srcW / srcH) * drawH;
