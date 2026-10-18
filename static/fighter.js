@@ -213,7 +213,7 @@
     location.href = "/login";
   };
 
-  const ASSET_VER = "20261018h";
+  const ASSET_VER = "20261018i";
   const CHARACTERS = [
     {
       id: "herta",
@@ -403,7 +403,7 @@
       H = 540;
 
     // Action sprites (facing right in source art). Cache-bust so browsers don't keep old JS-era 404s.
-    const ASSET_VER = "20261018h";
+    const ASSET_VER = "20261018i";
     const SPRITE_KEYS = [
       "idle",
       "walk",
@@ -931,7 +931,8 @@
         f.stamina -= STAMINA_COST_NORMAL;
         f.smash = false;
         f.atkKind = "aerial_attack";
-        f.atkTimer = 14;
+        f.atkTimer = LIGHT_ATK_DURATION; // 3-frame strip like light attacks
+        f.atkDuration = f.atkTimer;
         f.atkCool = 0;
         f.comboStep = 0;
         f.comboWindow = 0;
@@ -987,10 +988,11 @@
         hh = 22;
         smash = true;
       } else if (kind === "aerial_attack") {
-        active = f.atkTimer <= 10 && f.atkTimer >= 4;
-        reach = 78;
+        // Middle third of 3-frame aerial spin strip
+        active = f.atkTimer <= 12 && f.atkTimer >= 7;
+        reach = 86;
         hy = f.y + 4;
-        hh = 34;
+        hh = 36;
       } else if (kind === "crouch_attack") {
         active = f.atkTimer <= 8 && f.atkTimer >= 3;
         reach = 70;
@@ -1560,7 +1562,10 @@
       const isHeavyStrip =
         key === "heavy" && ok && img.naturalWidth >= img.naturalHeight * 2 && f.atkTimer > 0;
       const isLightStrip =
-        (key === "attack1" || key === "attack2" || key === "attack3") &&
+        (key === "attack1" ||
+          key === "attack2" ||
+          key === "attack3" ||
+          key === "aerial_attack") &&
         ok &&
         img.naturalWidth >= img.naturalHeight * 2 &&
         f.atkTimer > 0;
