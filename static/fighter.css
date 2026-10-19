@@ -105,7 +105,31 @@ body.fighter-touch-playing .fighter-main{
   .virt-btn.action.attack{width:64px;height:64px}
   .arena-hud{gap:6px}
   .hud-pct{font-size:24px}
-  .fighter-page .topbar .tabs{display:none}
+  /* Keep top nav visible on mobile so users can switch to 交易 (was display:none) */
+  .fighter-page .topbar{
+    gap:8px;
+    padding:8px 10px;
+  }
+  .fighter-page .topbar .brand .tag{display:none}
+  .fighter-page .topbar .tabs{
+    display:flex;
+    flex:1 1 auto;
+    flex-wrap:wrap;
+    gap:2px;
+    min-width:0;
+  }
+  .fighter-page .topbar .tab{
+    padding:6px 10px;
+    font-size:13px;
+  }
+  .fighter-page .topbar .right{
+    gap:8px;
+  }
+  .fighter-page .topbar .right .user{font-size:12px}
+}
+/* Even mid-fight on narrow screens, keep at least the 交易 switch visible */
+@media (max-width:700px){
+  body.fighter-touch-playing .topbar .tabs{display:flex}
 }
 @media (orientation:landscape) and (max-height:500px){
   .virt-pad{padding:4px 16px calc(4px + env(safe-area-inset-bottom, 0px))}
