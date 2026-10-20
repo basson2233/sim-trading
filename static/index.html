@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>模擬股票交易平台</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20261020b">
 </head>
 <body>
 <header class="topbar">
@@ -137,7 +137,22 @@
   </div>
 </div>
 
+
+<div id="userViewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="uvTitle">
+  <div class="modal-box wide">
+    <div class="panel-title" style="margin-bottom:12px">
+      <h2 id="uvTitle" style="margin:0">用戶持倉</h2>
+      <button type="button" class="btn ghost small" id="uvClose">關閉</button>
+    </div>
+    <p class="muted" id="uvSummary"></p>
+    <h3 class="uv-h">持倉</h3>
+    <div class="table-wrap"><table id="uvPosTable"></table></div>
+    <h3 class="uv-h">成交紀錄</h3>
+    <div class="table-wrap"><table id="uvTradeTable"></table></div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=20261020b"></script>
 </body>
 </html>

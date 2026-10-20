@@ -169,3 +169,28 @@ def test_pages_served_after_login(app):
     r = c.get("/")
     assert r.status_code == 200 and "模擬股票交易平台" in r.text and "登出" in r.text
     assert c.get("/static/app.js").status_code == 200
+
+def test_user_public_view_read_only(app):
+    """Logged-in classmates can view another's portfolio + trades; no secrets leaked."""
+    alice, bob = client(app), client(app)
+    register(alice, "alice")
+    register(bob, "bob")
+    alice.post("/api/me/orders", json={"symbol": "AAPL", "side": "BUY", "type": "MARKET", "qty": 10})
+    # unauthenticated blocked
+    anon = client(app)
+    assert anon.get("/api/users/alice/view").status_code == 401
+    # bob can view alice
+    r = bob.get("/api/users/alice/view")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["username"] == "alice"
+    assert "password" not in data and "email" not in data and "password_hash" not in str(data)
+    assert any(p["symbol"] == "AAPL" for p in data["positions"])
+    assert len(data["trades"]) >= 1
+    assert data["trades"][0]["symbol"] == "AAPL"
+    assert "user_id" not in data["trades"][0]
+    # missing user
+    assert bob.get("/api/users/nobody_here/view").status_code == 400
+    # alice can view herself too
+    assert alice.get("/api/users/alice/view").status_code == 200
+

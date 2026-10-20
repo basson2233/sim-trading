@@ -279,14 +279,60 @@ async function refreshAccount() {
 async function loadLeaderboard() {
   try {
     const lb = await api("/api/leaderboard");
-    $("#lbNote").textContent = `以美元為基準貨幣計算總資產同回報率。更新時間：${tHK(lb.as_of)} HKT`;
+    $("#lbNote").textContent = `以美元為基準貨幣計算總資產同回報率。更新時間：${tHK(lb.as_of)} HKT　·　撳用戶名可睇持倉同成交`;
     const rows = lb.rows.map((r) => `<tr class="rank${r.rank} ${r.username === state.user ? "me" : ""}">
-      <td class="l">${r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</td><td class="l">${esc(r.username)}${r.username === state.user ? "（你）" : ""}</td>
+      <td class="l">${r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</td>
+      <td class="l"><button type="button" class="user-link" data-view-user="${esc(r.username)}">${esc(r.username)}</button>${r.username === state.user ? "（你）" : ""}</td>
       <td class="${cls(r.return_pct)}"><b>${sign(r.return_pct)}${fmt(r.return_pct, 3)}%</b></td><td>USD ${fmt(r.equity)}</td>
       <td class="${cls(r.pnl)}">${sign(r.pnl)}${fmt(r.pnl)}</td><td>${r.positions}</td><td>${r.trades}</td></tr>`).join("");
     $("#lbTable").innerHTML = `<tr><th class="l">排名</th><th class="l">用戶</th><th>總回報率</th><th>總資產（美元）</th><th>總盈虧 (USD)</th><th>持倉數</th><th>成交次數</th></tr>` +
       (rows || `<tr><td colspan="7" class="empty">暫時未有用戶</td></tr>`);
   } catch (e) { toast(e.message); }
+}
+
+function openUserView(show) {
+  const m = $("#userViewModal");
+  if (!m) return;
+  m.classList.toggle("hidden", !show);
+}
+
+async function viewUserPortfolio(username) {
+  if (!username) return;
+  openUserView(true);
+  $("#uvTitle").textContent = `${username} 嘅持倉`;
+  $("#uvSummary").textContent = "載入中…";
+  $("#uvPosTable").innerHTML = "";
+  $("#uvTradeTable").innerHTML = "";
+  try {
+    const v = await api(`/api/users/${encodeURIComponent(username)}/view`);
+    const t = v.total || {};
+    $("#uvTitle").textContent = `${v.username} 嘅持倉`;
+    $("#uvSummary").innerHTML =
+      `總資產 <b>USD ${fmt(t.equity)}</b>　·　總盈虧 <b class="${cls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</b>　·　回報率 <b class="${cls(t.return_pct)}">${pct(t.return_pct)}</b>`;
+    const posRows = (v.positions || []).map((x) => `<tr>
+      <td class="l">${esc(x.symbol)}</td><td class="l">${esc(x.name)}</td>
+      <td>${x.currency}</td><td>${fmt(x.qty, 0)}</td>
+      <td>${fmtPx(x.avg_cost)}</td><td>${fmtPx(x.price)}</td>
+      <td>${fmt(x.market_value)}</td>
+      <td class="${cls(x.unrealized_pnl)}">${sign(x.unrealized_pnl)}${fmt(x.unrealized_pnl)} (${pct(x.unrealized_pnl_pct)})</td>
+    </tr>`).join("");
+    $("#uvPosTable").innerHTML =
+      `<tr><th class="l">代號</th><th class="l">名稱</th><th>貨幣</th><th>數量</th><th>平均成本</th><th>現價</th><th>市值</th><th>未實現盈虧</th></tr>` +
+      (posRows || `<tr><td colspan="8" class="empty">暫時未有持倉</td></tr>`);
+    const tradeRows = (v.trades || []).map((tr) => `<tr>
+      <td class="l">${tHK(tr.executed_at_iso)}</td>
+      <td class="l">${esc(tr.symbol)}</td><td class="l">${esc(tr.name)}</td>
+      <td><span class="pill ${tr.side}">${SIDE[tr.side] || tr.side}</span></td>
+      <td>${fmt(tr.qty, 0)}</td><td>${fmtPx(tr.price)}</td>
+      <td>${tr.currency} ${fmt(tr.amount)}</td>
+      <td class="${cls(tr.realized_pnl)}">${tr.realized_pnl == null ? "-" : sign(tr.realized_pnl) + fmt(tr.realized_pnl)}</td>
+    </tr>`).join("");
+    $("#uvTradeTable").innerHTML =
+      `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th></tr>` +
+      (tradeRows || `<tr><td colspan="8" class="empty">暫時未有成交</td></tr>`);
+  } catch (e) {
+    $("#uvSummary").textContent = "❌ " + e.message;
+  }
 }
 
 // ---------------------------------------------------------------- tabs / wiring
@@ -435,6 +481,17 @@ function init() {
     try { await api(`${U()}/reset`, {method: "POST"}); toast("帳戶已重設"); refreshAccount(); } catch (e) { toast(e.message); }
   };
   $("#lbRefresh").onclick = loadLeaderboard;
+  const uvClose = $("#uvClose");
+  if (uvClose) uvClose.onclick = () => openUserView(false);
+  const uvModal = $("#userViewModal");
+  if (uvModal) uvModal.addEventListener("click", (e) => { if (e.target === uvModal) openUserView(false); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && uvModal && !uvModal.classList.contains("hidden")) openUserView(false);
+  });
+  document.body.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-view-user]");
+    if (btn) viewUserPortfolio(btn.getAttribute("data-view-user"));
+  });
   const cv = $("#chart");
   cv.addEventListener("mousemove", (e) => drawChart(e.offsetX));
   cv.addEventListener("mouseleave", () => drawChart());

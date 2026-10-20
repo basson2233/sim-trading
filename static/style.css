@@ -83,3 +83,12 @@ tr.me td{background:rgba(59,130,246,.10)}
 .demo-link a{display:block;word-break:break-all;margin-top:4px}
 .google-btn{text-align:center;text-decoration:none;display:block}
 .google-btn.hidden{display:none}
+
+.modal-box.wide{width:min(920px,96vw);max-height:85vh;overflow:auto;padding:20px 22px}
+.uv-h{font-size:14px;margin:16px 0 8px}
+button.user-link,a.user-link{
+  background:none;border:none;padding:0;margin:0;cursor:pointer;
+  color:var(--accent);font:inherit;font-weight:600;text-decoration:underline;
+  text-underline-offset:2px
+}
+button.user-link:hover{color:#93c5fd}

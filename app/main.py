@@ -291,6 +291,24 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     def leaderboard(user=Depends(current_user)):
         return engine.leaderboard()
 
+    @app.get("/api/users/{username}/view")
+    def user_public_view(username: str, user=Depends(current_user)):
+        """Read-only portfolio + recent trades for any classmate (auth required).
+        Reuses engine.portfolio / engine.trades — no email, password, or secrets."""
+        def _view():
+            # Normalize via validate so path casing / trim matches stored usernames
+            name = engine.validate_username(username)
+            p = engine.portfolio(name)
+            trades = engine.trades(name, limit=100)
+            return {
+                "username": p["username"],
+                "base_currency": p.get("base_currency"),
+                "total": p["total"],
+                "accounts": p["accounts"],
+                "positions": p["positions"],
+                "trades": trades,
+            }
+        return guard(_view)
 
     # ------------------------------------------------------------- 理財戰士 (Finance Fighter)
     class FighterMatchIn(BaseModel):
