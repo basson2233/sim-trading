@@ -199,7 +199,7 @@
               r.player_username.toLowerCase() === me.username.toLowerCase()
                 ? `${r.player_kos}–${r.opponent_kos}`
                 : `${r.opponent_kos}–${r.player_kos}`;
-            return `<tr><td class="l">${r.created_at_iso || ""}</td><td>${r.mode === "ai" ? "AI" : "同學"}</td><td class="l">${opp}</td><td>${win}</td><td>${score}</td></tr>`;
+            return `<tr><td class="l">${r.created_at_iso || ""}</td><td>${r.mode === "ai" ? "AI" : r.mode === "online" ? "聯機" : "同學"}</td><td class="l">${opp}</td><td>${win}</td><td>${score}</td></tr>`;
           })
           .join("");
       }
@@ -533,7 +533,7 @@
 
     async function join(code) {
       const c = String(code || "").trim().toUpperCase();
-      if (!/^[A-Z0-9]{6}$/.test(c)) {
+      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(c)) {
         setMsg("請輸入 6 位房間碼", true);
         return;
       }
@@ -547,6 +547,10 @@
 
     function ready() {
       if (!state) return;
+      if (state.youReady) {
+        if (send({ type: "unready" }) || send({ type: "ready", ready: false })) applyState({ youReady: false });
+        return;
+      }
       if (send({ type: "ready" })) applyState({ youReady: true });
     }
 
