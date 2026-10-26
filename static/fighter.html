@@ -6,7 +6,7 @@
 <title>理財戰士 — 模擬股票交易平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/style.css?v=20261020a">
-<link rel="stylesheet" href="/static/fighter.css?v=20261026b">
+<link rel="stylesheet" href="/static/fighter.css?v=20261026c">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle_ai.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/walk.png?v=20261020a">
@@ -82,13 +82,21 @@
         </div>
         <div class="mode-card">
           <h4>🌐 聯機對戰（房間）</h4>
-          <p class="muted">建立房間或輸入 6 位房間碼，雙方 ready 後開戰。AI／同學賽仍可本地練習。</p>
+          <p class="muted">公開房會出現喺下面列表；私人房只可用 6 位碼加入。雙方 ready 後開戰。</p>
+          <label class="room-public-label"><input type="checkbox" id="roomPublic" checked> 公開房間（所有人可見）</label>
           <div class="room-actions">
             <button type="button" id="btnCreateRoom" class="btn primary big">建立房間</button>
           </div>
-          <label>房間碼<input id="roomCodeIn" placeholder="6 位碼" maxlength="6" autocomplete="off" inputmode="text"></label>
-          <button type="button" id="btnJoinRoom" class="btn big">加入房間</button>
+          <label>房間碼（私人／手動）<input id="roomCodeIn" placeholder="6 位碼" maxlength="6" autocomplete="off" inputmode="text"></label>
+          <button type="button" id="btnJoinRoom" class="btn big">用房間碼加入</button>
           <div id="roomMsg" class="msg"></div>
+          <div class="public-rooms">
+            <div class="public-rooms-head">
+              <h4>公開房間</h4>
+              <button type="button" id="btnRefreshPublic" class="btn ghost small">重新整理</button>
+            </div>
+            <div id="publicRoomList" class="public-room-list"><p class="muted small-text">載入中…</p></div>
+          </div>
         </div>
         <div class="mode-card">
           <h4>👥 每週同學賽</h4>
@@ -202,6 +210,6 @@
 </main>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/fighter.js?v=20261026b"></script>
+<script src="/static/fighter.js?v=20261026c"></script>
 </body>
 </html>

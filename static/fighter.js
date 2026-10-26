@@ -206,6 +206,7 @@
     } catch (_) {
       /* ignore */
     }
+    if (typeof startPublicPoll === "function") startPublicPoll();
   }
 
   $("#logoutBtn").onclick = async () => {
@@ -532,8 +533,15 @@
 
     async function create() {
       setMsg("建立房間中…");
+      const pubEl = $("#roomPublic");
+      const isPublic = !!(pubEl && pubEl.checked);
       try {
-        await connect(() => send({ type: "create", mapId: selectedMapId, map_id: selectedMapId }));
+        await connect(() => send({
+          type: "create",
+          mapId: selectedMapId,
+          map_id: selectedMapId,
+          public: isPublic,
+        }));
       } catch (e) {
         setMsg((e && e.message) || "無法連線", true);
       }
@@ -565,6 +573,7 @@
     function leave() {
       send({ type: "leave" });
       close();
+      if (typeof loadPublicRooms === "function") loadPublicRooms();
     }
 
     return { create, join, ready, leave, close, getState: () => state };
@@ -594,6 +603,68 @@
       }
     };
   }
+
+  const MAP_LABELS = { hkex: "港交所擂台", wallstreet: "華爾街夜景", vault: "銀行金庫" };
+  let publicPollTimer = null;
+
+  function mapLabel(id) {
+    const key = id || "hkex";
+    if (MAPS[key] && MAPS[key].name) return MAPS[key].name;
+    return MAP_LABELS[key] || key;
+  }
+
+  function renderPublicRooms(rooms) {
+    const box = $("#publicRoomList");
+    if (!box) return;
+    const rows = Array.isArray(rooms) ? rooms : [];
+    if (!rows.length) {
+      box.innerHTML = `<p class="muted small-text">而家未有公開房間，建立一個俾同學加入啦。</p>`;
+      return;
+    }
+    box.innerHTML = rows.map((r) => {
+      const code = r.code || r.room_code || "";
+      const host = (r.host && (r.host.display_name || r.host.username)) || "—";
+      const mapId = r.mapId || r.map_id || "hkex";
+      const players = r.players != null ? r.players : 1;
+      return `<div class="public-room-row" data-code="${code}">
+        <div class="meta">
+          <strong>${code}</strong>
+          <span>房主 ${host} · ${mapLabel(mapId)} · ${players}/2</span>
+        </div>
+        <button type="button" class="btn small join-public" data-code="${code}">加入</button>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".join-public").forEach((btn) => {
+      btn.onclick = () => RoomNet.join(btn.dataset.code);
+    });
+  }
+
+  async function loadPublicRooms() {
+    const box = $("#publicRoomList");
+    try {
+      const data = await api("/api/fighter/rooms/public");
+      renderPublicRooms(data.rooms || []);
+    } catch (e) {
+      if (box) box.innerHTML = `<p class="muted small-text">${(e && e.message) || "載入失敗"}</p>`;
+    }
+  }
+
+  function startPublicPoll() {
+    stopPublicPoll();
+    loadPublicRooms();
+    publicPollTimer = setInterval(loadPublicRooms, 5000);
+  }
+
+  function stopPublicPoll() {
+    if (publicPollTimer) {
+      clearInterval(publicPollTimer);
+      publicPollTimer = null;
+    }
+  }
+
+  const btnRefreshPublic = $("#btnRefreshPublic");
+  if (btnRefreshPublic) btnRefreshPublic.onclick = () => loadPublicRooms();
+
 
 
   $("#btnRematch").onclick = () => {
