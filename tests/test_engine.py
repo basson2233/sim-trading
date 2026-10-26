@@ -225,6 +225,7 @@ def test_leaderboard_ranks_by_return(eng, feed):
     lb = eng.leaderboard()
     assert [r["username"] for r in lb["rows"]] == ["alice", "carol", "bob"]
     assert [r["rank"] for r in lb["rows"]] == [1, 2, 3]
+    assert all(isinstance(r.get("id"), int) for r in lb["rows"])
     a, c, b = lb["rows"]
     assert a["initial"] == USD0 and a["equity"] == pytest.approx(USD0 + 2_000)
     assert a["return_pct"] == pytest.approx(round(2_000 / USD0 * 100, 3))

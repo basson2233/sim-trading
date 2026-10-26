@@ -44,7 +44,10 @@ function applyMe(me) {
   state.user = me.username;
   state.hasPassword = !!me.has_password;
   state.email = me.email || "";
+  state.userId = me.id;
   $("#userName").textContent = me.username;
+  const idLab = $("#userIdLabel");
+  if (idLab) idLab.textContent = me.id != null ? `ID ${me.id}` : "";
   $("#userEmail").textContent = "";  // privacy: never show email in header
   $("#changePwBtn").textContent = state.hasPassword ? "更改密碼" : "設定密碼";
 }
@@ -282,11 +285,12 @@ async function loadLeaderboard() {
     $("#lbNote").textContent = `以美元為基準貨幣計算總資產同回報率。更新時間：${tHK(lb.as_of)} HKT　·　撳用戶名可睇持倉同成交`;
     const rows = lb.rows.map((r) => `<tr class="rank${r.rank} ${r.username === state.user ? "me" : ""}">
       <td class="l">${r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</td>
+      <td class="l">${r.id != null ? r.id : "—"}</td>
       <td class="l"><button type="button" class="user-link" data-view-user="${esc(r.username)}">${esc(r.username)}</button>${r.username === state.user ? "（你）" : ""}</td>
       <td class="${cls(r.return_pct)}"><b>${sign(r.return_pct)}${fmt(r.return_pct, 3)}%</b></td><td>USD ${fmt(r.equity)}</td>
       <td class="${cls(r.pnl)}">${sign(r.pnl)}${fmt(r.pnl)}</td><td>${r.positions}</td><td>${r.trades}</td></tr>`).join("");
-    $("#lbTable").innerHTML = `<tr><th class="l">排名</th><th class="l">用戶</th><th>總回報率</th><th>總資產（美元）</th><th>總盈虧 (USD)</th><th>持倉數</th><th>成交次數</th></tr>` +
-      (rows || `<tr><td colspan="7" class="empty">暫時未有用戶</td></tr>`);
+    $("#lbTable").innerHTML = `<tr><th class="l">排名</th><th class="l">ID</th><th class="l">用戶</th><th>總回報率</th><th>總資產（美元）</th><th>總盈虧 (USD)</th><th>持倉數</th><th>成交次數</th></tr>` +
+      (rows || `<tr><td colspan="8" class="empty">暫時未有用戶</td></tr>`);
   } catch (e) { toast(e.message); }
 }
 
@@ -475,6 +479,39 @@ function init() {
   $("#pwForm").addEventListener("submit", changePw);
   $("#changeEmailBtn").onclick = () => openEmail(true);
   $("#emCancel").onclick = () => openEmail(false);
+
+function openNameModal(show) {
+  const m = $("#nameModal");
+  if (!m) return;
+  m.classList.toggle("hidden", !show);
+  if (show) {
+    $("#nameForm").reset();
+    $("#nmMsg").textContent = "";
+    $("#nmUser").value = state.user || "";
+    $("#nmUser").focus();
+  }
+}
+async function changeUsername(e) {
+  e.preventDefault();
+  const msg = $("#nmMsg");
+  msg.className = "msg"; msg.textContent = "";
+  const name = ($("#nmUser").value || "").trim();
+  try {
+    const r = await api("/api/auth/change-username", {method: "POST", body: {username: name}});
+    state.user = r.username;
+    $("#userName").textContent = r.username;
+    openNameModal(false);
+    toast("用戶名已更改為 " + r.username);
+    if (!$("#tab-leaderboard").classList.contains("hidden")) loadLeaderboard();
+  } catch (err) {
+    msg.className = "msg err";
+    msg.textContent = "❌ " + err.message;
+  }
+}
+if ($("#changeNameBtn")) $("#changeNameBtn").onclick = () => openNameModal(true);
+if ($("#nmCancel")) $("#nmCancel").onclick = () => openNameModal(false);
+if ($("#nameForm")) $("#nameForm").addEventListener("submit", changeUsername);
+
   $("#emailForm").addEventListener("submit", changeEmail);
   $("#resetBtn").onclick = async () => {
     if (!confirm("確定要重設帳戶？所有持倉、訂單同記錄會被清除，資金會還原至初始金額。")) return;

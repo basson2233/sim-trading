@@ -714,10 +714,12 @@ class Engine:
         cache = {}
         rows = []
         for name in self.list_users():
+            uid = self.db.execute("SELECT id FROM users WHERE username=?", (name,)).fetchone()
             p = self.portfolio(name, fx=fx, quote_cache=cache)
             n_trades = self.db.execute("SELECT COUNT(*) FROM trades t JOIN users u ON u.id=t.user_id "
                                        "WHERE u.username=?", (name,)).fetchone()[0]
-            rows.append({"username": name, "equity": p["total"]["equity"], "initial": p["total"]["initial"],
+            rows.append({"id": uid["id"] if uid else None, "username": name,
+                         "equity": p["total"]["equity"], "initial": p["total"]["initial"],
                          "pnl": p["total"]["pnl"], "return_pct": p["total"]["return_pct"],
                          "positions": len(p["positions"]), "trades": n_trades})
         rows.sort(key=lambda r: (-r["return_pct"], r["username"].lower()))

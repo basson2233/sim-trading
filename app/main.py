@@ -175,6 +175,9 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         email: str
         password: str
 
+    class ChangeUsernameIn(BaseModel):
+        username: str
+
     class ChangePwIn(BaseModel):
         current_password: Optional[str] = None
         new_password: str
@@ -231,6 +234,10 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     def change_email(body: ChangeEmailIn, user=Depends(current_user)):
         guard(auth.change_email, user["id"], body.current_password, body.email)
         return {"ok": True}
+
+    @app.post("/api/auth/change-username")
+    def change_username(body: ChangeUsernameIn, user=Depends(current_user)):
+        return guard(auth.change_username, user["id"], body.username)
 
     @app.post("/api/auth/change-password")
     def change_password(body: ChangePwIn, request: Request, user=Depends(current_user)):

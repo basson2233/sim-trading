@@ -331,11 +331,11 @@ class GoogleOAuth:
 # bind new methods onto AuthService
 def _profile(self, user_id):
     row = self.db.execute(
-        "SELECT username, email, email_verified, password_hash, google_sub FROM users WHERE id=?",
+        "SELECT id, username, email, email_verified, password_hash, google_sub FROM users WHERE id=?",
         (user_id,)).fetchone()
     if not row:
         raise TradingError("搵唔到用戶")
-    return {"username": row["username"], "email": row["email"],
+    return {"id": row["id"], "username": row["username"], "email": row["email"],
             "email_verified": bool(row["email_verified"]), "has_password": bool(row["password_hash"]),
             "google": bool(row["google_sub"])}
 
@@ -490,7 +490,26 @@ def _login_with_google(self, code, state, cookie_state, google):
         return user
 
 
+
+def _change_username(self, user_id, new_username):
+    """User self-serve rename. Updates public username + denormalized fighter history."""
+    row = self.db.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        raise TradingError("搵唔到用戶")
+    status = self.engine.rename_user(row["username"], new_username)
+    if status.startswith("taken"):
+        raise TradingError("呢個用戶名已經有人用")
+    if status.startswith("not_found"):
+        raise TradingError("搵唔到用戶")
+    if status.startswith("skipped"):
+        raise TradingError("用戶名無效")
+    # unchanged / renamed both OK
+    me = self.db.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+    return {"ok": True, "username": me["username"] if me else new_username}
+
+
 AuthService.profile = _profile
+AuthService.change_username = _change_username
 AuthService.change_email = _change_email
 AuthService.request_password_reset = _request_password_reset
 AuthService.reset_password = _reset_password

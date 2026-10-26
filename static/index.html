@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>模擬股票交易平台</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/style.css?v=20261020b">
+<link rel="stylesheet" href="/static/style.css?v=20261026e">
 </head>
 <body>
 <header class="topbar">
@@ -18,6 +18,8 @@
   <div class="right">
     <span id="sourceBadge" class="badge">報價來源：…</span>
     <span class="user">用戶：<b id="userName">-</b> <span id="userEmail" class="muted"></span></span>
+    <span class="user-id muted" id="userIdLabel"></span>
+    <button id="changeNameBtn" class="btn ghost small">改用戶名</button>
     <button id="changeEmailBtn" class="btn ghost small">更改電郵</button>
     <button id="changePwBtn" class="btn ghost small">更改密碼</button>
     <button id="logoutBtn" class="btn ghost small">登出</button>
@@ -123,6 +125,20 @@
   </div>
 </div>
 
+
+<div id="nameModal" class="modal hidden">
+  <div class="modal-box">
+    <h2>更改用戶名</h2>
+    <p class="muted">2–20 字，中英文／數字／_／-。用戶 ID 唔會變；排行榜同對戰會顯示新名。</p>
+    <form id="nameForm" class="order-form">
+      <label>新用戶名<input id="nmUser" autocomplete="username" required maxlength="20"></label>
+      <div class="msg" id="nmMsg"></div>
+      <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="nmCancel" style="flex:1">取消</button>
+      <button class="btn primary" style="flex:1">確認更改</button></div>
+    </form>
+  </div>
+</div>
+
 <div id="emailModal" class="modal hidden">
   <div class="modal-box">
     <h2>更改電郵</h2>
@@ -153,6 +169,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=20261026d"></script>
+<script src="/static/app.js?v=20261026e"></script>
 </body>
 </html>
