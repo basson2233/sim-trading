@@ -438,18 +438,13 @@ def _consume_oauth_state(self, state, cookie_state):
 
 
 def _username_from_email(self, email):
-    local = re.sub(r"[^a-z0-9_\-]", "", email.split("@", 1)[0].lower())[:20]
-    if len(local) < 2:
-        local = "user"
-    candidate, n = local, 2
-    while self.db.execute("SELECT 1 FROM users WHERE username = ?", (candidate,)).fetchone():
-        suffix = str(n)
-        candidate = local[:20 - len(suffix)] + suffix
-        n += 1
-        if n > 9999:
-            candidate = "u" + secrets.token_hex(4)
-            break
-    return candidate
+    """Privacy: do not derive public username from email local-part.
+    Assign a numeric handle like u482917 instead."""
+    for _ in range(64):
+        candidate = "u" + f"{secrets.randbelow(1_000_000):06d}"
+        if not self.db.execute("SELECT 1 FROM users WHERE username = ?", (candidate,)).fetchone():
+            return candidate
+    return "u" + secrets.token_hex(4)[:8]
 
 
 def _google_verified(info):

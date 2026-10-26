@@ -45,7 +45,7 @@ function applyMe(me) {
   state.hasPassword = !!me.has_password;
   state.email = me.email || "";
   $("#userName").textContent = me.username;
-  $("#userEmail").textContent = me.email ? "· " + me.email : "· 未設定電郵";
+  $("#userEmail").textContent = "";  // privacy: never show email in header
   $("#changePwBtn").textContent = state.hasPassword ? "更改密碼" : "設定密碼";
 }
 function openPw(show) {
@@ -79,7 +79,7 @@ async function changeEmail(e) {
   try {
     await api("/api/auth/change-email", {method: "POST", body: {current_password: $("#emPw").value, email: $("#emEmail").value.trim()}});
     state.email = $("#emEmail").value.trim().toLowerCase();
-    $("#userEmail").textContent = "· " + state.email;
+    $("#userEmail").textContent = "";
     openEmail(false); toast("電郵已更改 ✅");
   } catch (err) { m.className = "msg err"; m.textContent = "❌ " + err.message; }
 }
