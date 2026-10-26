@@ -425,8 +425,16 @@
       }
       const btn = $("#btnRoomReady");
       if (btn) {
-        btn.disabled = !!state.youReady || st === "fighting";
-        btn.textContent = state.youReady ? "已準備" : "準備就緒";
+        btn.disabled = st === "fighting";
+        if (state.youReady) {
+          btn.textContent = "取消準備";
+          btn.classList.add("unready");
+          btn.classList.remove("primary");
+        } else {
+          btn.textContent = "準備就緒";
+          btn.classList.remove("unready");
+          btn.classList.add("primary");
+        }
       }
     }
 

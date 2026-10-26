@@ -6,7 +6,7 @@
 <title>理財戰士 — 模擬股票交易平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/style.css?v=20261020a">
-<link rel="stylesheet" href="/static/fighter.css?v=20261026a">
+<link rel="stylesheet" href="/static/fighter.css?v=20261026b">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle_ai.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/walk.png?v=20261020a">
@@ -100,20 +100,22 @@
       </div>
     </div>
 
-    <div id="roomWait" class="panel room-wait hidden">
-      <div class="panel-title">
-        <h3>聯機房間</h3>
-        <button type="button" id="btnLeaveRoom" class="btn ghost small">離開房間</button>
+    <div id="roomWait" class="room-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="roomWaitTitle">
+      <div class="room-modal">
+        <div class="room-modal-head">
+          <h3 id="roomWaitTitle">聯機房間</h3>
+          <button type="button" id="btnLeaveRoom" class="btn ghost small">離開</button>
+        </div>
+        <p class="room-code-line">房間碼 <strong id="roomCodeOut">------</strong>
+          <button type="button" id="btnCopyRoom" class="btn ghost small">複製</button>
+        </p>
+        <p class="muted small-text" id="roomStatus">等待對手加入…</p>
+        <div class="room-players" id="roomPlayers"></div>
+        <div class="room-ready-row">
+          <button type="button" id="btnRoomReady" class="btn primary big">準備就緒</button>
+        </div>
+        <div id="roomWaitMsg" class="msg"></div>
       </div>
-      <p class="room-code-line">房間碼 <strong id="roomCodeOut">------</strong>
-        <button type="button" id="btnCopyRoom" class="btn ghost small">複製</button>
-      </p>
-      <p class="muted small-text" id="roomStatus">等待對手加入…</p>
-      <div class="room-players" id="roomPlayers"></div>
-      <div class="room-ready-row">
-        <button type="button" id="btnRoomReady" class="btn primary big">準備就緒</button>
-      </div>
-      <div id="roomWaitMsg" class="msg"></div>
     </div>
     <div class="panel">
       <div class="panel-title"><h3>近期對戰</h3></div>
@@ -200,6 +202,6 @@
 </main>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/fighter.js?v=20261026a"></script>
+<script src="/static/fighter.js?v=20261026b"></script>
 </body>
 </html>
