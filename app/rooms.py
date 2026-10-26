@@ -317,6 +317,30 @@ class RoomStore:
             raise PermissionError("你唔喺呢個房間")
         return room
 
+    def purge_user(self, username: str) -> tuple[list[WebSocket], list[Room]]:
+        """Force-remove a user from every room (including fighting).
+
+        Sync membership cleanup for the admin delete API. Collects their
+        WebSockets so the caller can best-effort close them, and returns any
+        rooms that still have peers (caller should broadcast updated views).
+        """
+        username = (username or "").strip()
+        sockets: list[WebSocket] = []
+        remaining: list[Room] = []
+        if not username:
+            return sockets, remaining
+        for code in list(self._rooms_by_code.keys()):
+            room = self._rooms_by_code.get(code)
+            if not room or username not in room.players:
+                continue
+            player = room.players.get(username)
+            if player:
+                sockets.extend(list(player.websockets))
+            left = self.leave(code, username)
+            if left is not None:
+                remaining.append(left)
+        return sockets, remaining
+
     def _leave_all(self, username: str) -> None:
         for code in list(self._rooms_by_code.keys()):
             room = self._rooms_by_code.get(code)

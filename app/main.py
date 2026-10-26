@@ -1,5 +1,6 @@
 """FastAPI app: JSON API under /api (auth required), login/register pages, trading SPA at /."""
 import asyncio
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -245,6 +246,59 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         except Exception as e:  # pragma: no cover
             return {"ok": True, "price_source": "error", "error": str(e)}
         return {"ok": True, "price_mode": os.environ.get("PRICE_SOURCE", "auto"), "price_source": q.source}
+
+    def _require_admin_key(request: Request) -> None:
+        """Constant-time check of X-Admin-Key against ADMIN_API_KEY."""
+        expected = (os.environ.get("ADMIN_API_KEY") or "").strip()
+        if not expected:
+            raise HTTPException(status_code=503, detail="admin disabled")
+        got = request.headers.get("X-Admin-Key") or ""
+        if not hmac.compare_digest(got, expected):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    async def _admin_purge_cleanup(rooms: RoomStore, sockets, remaining_rooms) -> None:
+        for room in remaining_rooms:
+            try:
+                await rooms.broadcast_views(room, "room")
+            except Exception:
+                log.exception("admin purge broadcast failed")
+        for ws in sockets:
+            try:
+                await ws.close(code=4401)
+            except Exception:
+                pass
+
+    @app.get("/api/admin/users/{user_id}")
+    def admin_get_user(user_id: int, request: Request):
+        """Privacy-safe user lookup for the admin UI (no email/password/google_sub)."""
+        _require_admin_key(request)
+        summary = engine.admin_user_summary(user_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="user not found")
+        return summary
+
+    @app.delete("/api/admin/users/{user_id}")
+    async def admin_delete_user(user_id: int, request: Request, background_tasks: BackgroundTasks):
+        """Delete user by id: purge room seats, wipe all related DB rows."""
+        _require_admin_key(request)
+        summary = engine.admin_user_summary(user_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="user not found")
+        username = summary["username"]
+        rooms: RoomStore = request.app.state.rooms
+        sockets, remaining = rooms.purge_user(username)
+        result = engine.delete_user_by_id(user_id)
+        if not result.get("deleted"):
+            # Race: wiped from rooms but row gone — still report not found
+            raise HTTPException(status_code=404, detail="user not found")
+        if sockets or remaining:
+            background_tasks.add_task(_admin_purge_cleanup, rooms, sockets, remaining)
+        return {
+            "ok": True,
+            "id": result["id"],
+            "username": result["username"],
+            "deleted": True,
+        }
 
     @app.get("/api/symbols/suggest")
     def symbols_suggest(q: str = Query("", max_length=64), limit: int = Query(10, ge=1, le=25),

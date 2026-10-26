@@ -346,6 +346,44 @@ class Engine:
                 self.delete_user_data(db, row["id"], username=row["username"])
             return f"deleted: id={row['id']} username={row['username']}"
 
+    def admin_user_summary(self, user_id):
+        """Privacy-safe admin lookup: no email / password / google_sub values."""
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return None
+        with self.lock:
+            row = self.db.execute(
+                "SELECT id, username, created_at, email, google_sub FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "created_at": row["created_at"],
+            "has_google": bool(row["google_sub"]),
+            "has_email": bool(row["email"]),
+        }
+
+    def delete_user_by_id(self, user_id):
+        """Delete one user by id and all related rows. Returns a status dict for the admin API."""
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "deleted": False, "error": "invalid_id"}
+        with self.lock:
+            row = self.db.execute(
+                "SELECT id, username FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if not row:
+                return {"ok": False, "deleted": False, "error": "not_found", "id": user_id}
+            username = row["username"]
+            with self._tx() as db:
+                self.delete_user_data(db, row["id"], username=username)
+            return {"ok": True, "deleted": True, "id": row["id"], "username": username}
+
     def rename_user(self, old_username, new_username):
         """Rename a user and update denormalized fighter_matches rows. Returns status string."""
         old_username = (old_username or "").strip()
