@@ -370,6 +370,220 @@
     }
   };
 
+
+  // —— 聯機房間（WebSocket：create / join / ready / start；房間碼 6 位）——
+  const RoomNet = (() => {
+    let ws = null;
+    let state = null;
+
+    function wsUrl() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      return `${proto}//${location.host}/api/fighter/room/ws`;
+    }
+
+    function setMsg(text, err) {
+      const el = $("#roomMsg");
+      const w = $("#roomWaitMsg");
+      for (const node of [el, w]) {
+        if (!node) continue;
+        node.textContent = text || "";
+        node.className = err ? "msg err" : "msg";
+      }
+    }
+
+    function render() {
+      const wait = $("#roomWait");
+      if (!wait) return;
+      if (!state) {
+        wait.classList.add("hidden");
+        return;
+      }
+      wait.classList.remove("hidden");
+      const out = $("#roomCodeOut");
+      if (out) out.textContent = state.code || "------";
+      const statusEl = $("#roomStatus");
+      const st = state.status || "waiting";
+      if (statusEl) {
+        if (st === "waiting") statusEl.textContent = "等待對手加入…";
+        else if (st === "ready") statusEl.textContent = "雙方準備中，齊人就開戰";
+        else if (st === "fighting") statusEl.textContent = "開戰中…";
+        else statusEl.textContent = String(st);
+      }
+      const host = state.host || {};
+      const guest = state.guest || null;
+      const box = $("#roomPlayers");
+      if (box) {
+        const hostReady = !!(host.ready || (state.role === "host" && state.youReady));
+        const guestReady = !!(guest && (guest.ready || (state.role === "guest" && state.youReady)));
+        box.innerHTML =
+          `<div class="room-player ${hostReady ? "ready" : ""}">` +
+          `<div class="who">房主 · ${host.username || host.display_name || "—"}</div>` +
+          `<div class="st">${hostReady ? "已準備" : "未準備"}</div></div>` +
+          `<div class="room-player ${guest ? (guestReady ? "ready" : "") : "empty"}">` +
+          `<div class="who">${guest ? ("對手 · " + (guest.username || guest.display_name || "—")) : "等待加入…"}</div>` +
+          `<div class="st">${guest ? (guestReady ? "已準備" : "未準備") : "空位"}</div></div>`;
+      }
+      const btn = $("#btnRoomReady");
+      if (btn) {
+        btn.disabled = !!state.youReady || st === "fighting";
+        btn.textContent = state.youReady ? "已準備" : "準備就緒";
+      }
+    }
+
+    function applyState(s) {
+      state = Object.assign({}, state || {}, s || {});
+      render();
+    }
+
+    function close() {
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+        ws = null;
+      }
+      state = null;
+      render();
+      setMsg("");
+    }
+
+    function send(obj) {
+      if (!ws || ws.readyState !== 1) {
+        setMsg("未連上房間伺服器", true);
+        return false;
+      }
+      ws.send(JSON.stringify(obj));
+      return true;
+    }
+
+    function connect(onOpen) {
+      return new Promise((resolve, reject) => {
+        try {
+          if (ws) {
+            try { ws.close(); } catch (_) {}
+            ws = null;
+          }
+          ws = new WebSocket(wsUrl());
+          ws.onopen = () => {
+            setMsg("");
+            if (onOpen) onOpen();
+            resolve();
+          };
+          ws.onmessage = (ev) => {
+            let msg;
+            try { msg = JSON.parse(ev.data); } catch (_) { return; }
+            const t = msg.type || msg.event;
+            if (t === "error") {
+              setMsg(msg.message || msg.detail || "房間錯誤", true);
+              return;
+            }
+            if (t === "room" || t === "state") {
+              applyState({
+                code: msg.code || msg.room_code,
+                role: msg.role,
+                status: msg.status,
+                host: msg.host,
+                guest: msg.guest,
+                mapId: msg.mapId || msg.map_id,
+                youReady: msg.you_ready != null ? msg.you_ready : (state && state.youReady),
+              });
+              return;
+            }
+            if (t === "ready") {
+              applyState({
+                host: msg.host || (state && state.host),
+                guest: msg.guest || (state && state.guest),
+                status: msg.status || "ready",
+                youReady: msg.you_ready != null ? msg.you_ready : (state && state.youReady),
+              });
+              return;
+            }
+            if (t === "start") {
+              applyState({ status: "fighting" });
+              const player = msg.player || myStats;
+              const opponent = msg.opponent;
+              if (!opponent) {
+                setMsg("開戰資料不完整", true);
+                return;
+              }
+              showArena({
+                mode: "online",
+                player,
+                opponent,
+                mapId: msg.mapId || msg.map_id || selectedMapId,
+                roomCode: state && state.code,
+                role: state && state.role,
+              });
+            }
+          };
+          ws.onerror = () => setMsg("WebSocket 連線失敗（後端未就緒或網絡問題）", true);
+          ws.onclose = () => {};
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    async function create() {
+      setMsg("建立房間中…");
+      try {
+        await connect(() => send({ type: "create", mapId: selectedMapId, map_id: selectedMapId }));
+      } catch (e) {
+        setMsg((e && e.message) || "無法連線", true);
+      }
+    }
+
+    async function join(code) {
+      const c = String(code || "").trim().toUpperCase();
+      if (!/^[A-Z0-9]{6}$/.test(c)) {
+        setMsg("請輸入 6 位房間碼", true);
+        return;
+      }
+      setMsg("加入房間中…");
+      try {
+        await connect(() => send({ type: "join", code: c, room_code: c }));
+      } catch (e) {
+        setMsg((e && e.message) || "無法連線", true);
+      }
+    }
+
+    function ready() {
+      if (!state) return;
+      if (send({ type: "ready" })) applyState({ youReady: true });
+    }
+
+    function leave() {
+      send({ type: "leave" });
+      close();
+    }
+
+    return { create, join, ready, leave, close, getState: () => state };
+  })();
+
+  const btnCreateRoom = $("#btnCreateRoom");
+  if (btnCreateRoom) btnCreateRoom.onclick = () => RoomNet.create();
+  const btnJoinRoom = $("#btnJoinRoom");
+  if (btnJoinRoom) {
+    btnJoinRoom.onclick = () => RoomNet.join($("#roomCodeIn") && $("#roomCodeIn").value);
+  }
+  const btnRoomReady = $("#btnRoomReady");
+  if (btnRoomReady) btnRoomReady.onclick = () => RoomNet.ready();
+  const btnLeaveRoom = $("#btnLeaveRoom");
+  if (btnLeaveRoom) btnLeaveRoom.onclick = () => RoomNet.leave();
+  const btnCopyRoom = $("#btnCopyRoom");
+  if (btnCopyRoom) {
+    btnCopyRoom.onclick = async () => {
+      const st = RoomNet.getState();
+      const code = (st && st.code) || "";
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        toast("已複製房間碼 " + code);
+      } catch (_) {
+        toast(code);
+      }
+    };
+  }
+
+
   $("#btnRematch").onclick = () => {
     if (!matchCtx) return;
     $("#resultOverlay").classList.add("hidden");

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -19,6 +19,7 @@ from .quotes import RANGES, UnknownSymbol, make_feed
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 from .universe import suggest_symbols
 from .fighter import ai_stats, compute_fighter_stats
+from .rooms import RoomStore, public_fighter
 
 log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
@@ -107,6 +108,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     app.state.engine = engine
     app.state.auth = auth
     app.state.google = google
+    app.state.rooms = RoomStore()
 
     @app.middleware("http")
     async def same_origin_writes(request: Request, call_next):
@@ -361,8 +363,8 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     def fighter_result(body: FighterResultIn, user=Depends(current_user)):
         """Record a finished match (optional history)."""
         mode = (body.mode or "").lower()
-        if mode not in ("ai", "classmate"):
-            raise HTTPException(400, "mode 必須係 ai 或 classmate")
+        if mode not in ("ai", "classmate", "online"):
+            raise HTTPException(400, "mode 必須係 ai / classmate / online")
         winner = (body.winner or "").lower()
         if winner not in ("player", "opponent", "draw"):
             raise HTTPException(400, "winner 必須係 player / opponent / draw")
@@ -378,6 +380,181 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     @app.get("/api/fighter/history")
     def fighter_history(user=Depends(current_user)):
         return {"rows": engine.recent_fighter_matches(user["username"])}
+
+    # ------------------------------------------------------------- 聯機房間 (WebSocket)
+    @app.websocket("/api/fighter/room/ws")
+    async def fighter_room_ws(websocket: WebSocket):
+        """Single-socket lobby: create / join / ready / start / leave.
+
+        Matches static/fighter.js RoomNet. Session cookie required.
+        """
+        user = auth.session_user(websocket.cookies.get(COOKIE))
+        if not user:
+            await websocket.close(code=4401)
+            return
+        await websocket.accept()
+        username = user["username"]
+        room_code = None
+        rooms = websocket.app.state.rooms
+
+        async def _err(message: str):
+            try:
+                await websocket.send_json({"type": "error", "message": message})
+            except Exception:
+                pass
+
+        async def _start_match(room):
+            """Snapshot live stats and send personalized start to each seat."""
+            names = list(room.players.keys())
+            if len(names) != 2:
+                await _err("需要兩位玩家先開戰")
+                return
+            try:
+                stats_by = {
+                    n: public_fighter(compute_fighter_stats(engine.portfolio(n)))
+                    for n in names
+                }
+            except TradingError as e:
+                await _err(str(e))
+                return
+            rooms.mark_fighting(room, room.map_id)
+            for n in names:
+                opp = next(x for x in names if x != n)
+                await rooms.send_json(room, n, {
+                    "type": "start",
+                    "player": stats_by[n],
+                    "opponent": stats_by[opp],
+                    "mapId": room.map_id,
+                    "map_id": room.map_id,
+                    "code": room.room_code,
+                    "room_code": room.room_code,
+                    "role": "host" if n == room.host else "guest",
+                    "mode": "online",
+                })
+
+        try:
+            while True:
+                raw = await websocket.receive_json()
+                if not isinstance(raw, dict):
+                    await _err("無效訊息")
+                    continue
+                typ = (raw.get("type") or raw.get("event") or "").strip().lower()
+
+                try:
+                    if typ == "create":
+                        map_id = raw.get("mapId") or raw.get("map_id")
+                        if room_code:
+                            left = rooms.leave(room_code, username)
+                            if left:
+                                await rooms.broadcast_views(left, "room")
+                        room = rooms.create(username, map_id=map_id)
+                        room_code = room.room_code
+                        rooms.attach_ws(room, username, websocket)
+                        await websocket.send_json(room.client_view(username))
+
+                    elif typ == "join":
+                        code = (raw.get("code") or raw.get("room_code") or "").strip().upper()
+                        if not code:
+                            await _err("請輸入房間碼")
+                            continue
+                        if room_code and room_code != code:
+                            left = rooms.leave(room_code, username)
+                            if left:
+                                await rooms.broadcast_views(left, "room")
+                        room = rooms.join(code, username)
+                        room_code = room.room_code
+                        rooms.attach_ws(room, username, websocket)
+                        await rooms.broadcast_views(room, "room")
+
+                    elif typ == "ready":
+                        if not room_code:
+                            await _err("你仲未加入房間")
+                            continue
+                        ready_flag = raw.get("ready")
+                        if ready_flag is None:
+                            ready_flag = True
+                        room = rooms.set_ready(room_code, username, bool(ready_flag))
+                        await rooms.broadcast_views(room, "ready")
+                        # Both ready → auto-start (lobby has no Start button).
+                        if room.both_ready() and room.status == "ready":
+                            await _start_match(room)
+
+                    elif typ == "unready":
+                        if not room_code:
+                            await _err("你仲未加入房間")
+                            continue
+                        room = rooms.set_ready(room_code, username, False)
+                        await rooms.broadcast_views(room, "ready")
+
+                    elif typ == "start":
+                        if not room_code:
+                            await _err("你仲未加入房間")
+                            continue
+                        room = rooms.get(room_code)
+                        if not room or username not in room.players:
+                            await _err("你唔喺呢個房間")
+                            continue
+                        if username != room.host:
+                            await _err("只有房主可以開戰")
+                            continue
+                        if not room.both_ready():
+                            await _err("雙方都要準備就緒先開戰")
+                            continue
+                        map_id = raw.get("mapId") or raw.get("map_id")
+                        if map_id:
+                            room.map_id = map_id
+                        await _start_match(room)
+
+                    elif typ == "leave":
+                        if room_code:
+                            left = rooms.leave(room_code, username)
+                            room_code = None
+                            if left:
+                                await rooms.broadcast_views(left, "room")
+                        try:
+                            await websocket.send_json({"type": "room", "status": "closed", "code": None})
+                        except Exception:
+                            pass
+
+                    elif typ == "ping":
+                        await websocket.send_json({"type": "pong"})
+
+                    elif typ == "input":
+                        # Stub for future input sync — acknowledge only.
+                        await websocket.send_json({"type": "input_ack"})
+
+                    else:
+                        await _err(f"未知事件: {typ or '?'}")
+
+                except LookupError as e:
+                    await _err(str(e))
+                except ValueError as e:
+                    await _err(str(e))
+                except PermissionError as e:
+                    await _err(str(e))
+                except RuntimeError as e:
+                    await _err(str(e))
+                except TradingError as e:
+                    await _err(str(e))
+
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            log.exception("fighter room ws error user=%s", username)
+        finally:
+            if room_code:
+                room = rooms.get(room_code)
+                if room and username in room.players:
+                    rooms.detach_ws(room, username, websocket)
+                    # Drop seat if no sockets left (tab closed).
+                    player = room.players.get(username)
+                    if player is not None and not player.websockets:
+                        left = rooms.leave(room_code, username)
+                        if left:
+                            try:
+                                await rooms.broadcast_views(left, "room")
+                            except Exception:
+                                pass
 
     # ------------------------------------------------------------- pages
     def logged_in(request):

@@ -237,3 +237,20 @@ body.fighter-touch-playing .fighter-main{
 .stam-val{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#67e8f9;text-align:right}
 .hud-side.right .stam-val{text-align:left}
 .hud-side.right .stam-label{text-align:left}
+
+/* Online room lobby */
+.room-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.room-actions .btn{margin-top:0}
+.room-wait{margin-top:14px}
+.room-code-line{font-size:1.15rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.room-code-line strong{letter-spacing:0.28em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.room-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.room-player{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.room-player .who{font-weight:600}
+.room-player .st{color:var(--muted);font-size:13px;margin-top:4px}
+.room-player.ready .st{color:var(--up)}
+.room-player.empty{opacity:0.55}
+.room-ready-row{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:640px){
+  .room-players{grid-template-columns:1fr}
+}

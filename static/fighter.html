@@ -6,7 +6,7 @@
 <title>理財戰士 — 模擬股票交易平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/style.css?v=20261020a">
-<link rel="stylesheet" href="/static/fighter.css?v=20261020a">
+<link rel="stylesheet" href="/static/fighter.css?v=20261026a">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/idle_ai.png?v=20261020a">
 <link rel="preload" as="image" href="/static/fighter/sprites/walk.png?v=20261020a">
@@ -81,13 +81,39 @@
           <button id="btnAI" class="btn primary big">開始對戰 AI</button>
         </div>
         <div class="mode-card">
+          <h4>🌐 聯機對戰（房間）</h4>
+          <p class="muted">建立房間或輸入 6 位房間碼，雙方 ready 後開戰。AI／同學賽仍可本地練習。</p>
+          <div class="room-actions">
+            <button type="button" id="btnCreateRoom" class="btn primary big">建立房間</button>
+          </div>
+          <label>房間碼<input id="roomCodeIn" placeholder="6 位碼" maxlength="6" autocomplete="off" inputmode="text"></label>
+          <button type="button" id="btnJoinRoom" class="btn big">加入房間</button>
+          <div id="roomMsg" class="msg"></div>
+        </div>
+        <div class="mode-card">
           <h4>👥 每週同學賽</h4>
-          <p class="muted">建議每週固定時間同同學對戰一次。輸入對方用戶名，用雙方當下持倉屬性開打。</p>
+          <p class="muted">建議每週固定時間同同學對戰一次。輸入對方用戶名，用雙方當下持倉屬性開打。（本地練習，非真聯機）</p>
           <label>同學用戶名<input id="oppName" placeholder="例如 classmate01" autocomplete="off"></label>
           <button id="btnClassmate" class="btn big">挑戰同學</button>
           <div id="matchMsg" class="msg"></div>
         </div>
       </div>
+    </div>
+
+    <div id="roomWait" class="panel room-wait hidden">
+      <div class="panel-title">
+        <h3>聯機房間</h3>
+        <button type="button" id="btnLeaveRoom" class="btn ghost small">離開房間</button>
+      </div>
+      <p class="room-code-line">房間碼 <strong id="roomCodeOut">------</strong>
+        <button type="button" id="btnCopyRoom" class="btn ghost small">複製</button>
+      </p>
+      <p class="muted small-text" id="roomStatus">等待對手加入…</p>
+      <div class="room-players" id="roomPlayers"></div>
+      <div class="room-ready-row">
+        <button type="button" id="btnRoomReady" class="btn primary big">準備就緒</button>
+      </div>
+      <div id="roomWaitMsg" class="msg"></div>
     </div>
     <div class="panel">
       <div class="panel-title"><h3>近期對戰</h3></div>
@@ -174,6 +200,6 @@
 </main>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/fighter.js?v=20261020a"></script>
+<script src="/static/fighter.js?v=20261026a"></script>
 </body>
 </html>
