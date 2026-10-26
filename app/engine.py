@@ -346,6 +346,57 @@ class Engine:
                 self.delete_user_data(db, row["id"], username=row["username"])
             return f"deleted: id={row['id']} username={row['username']}"
 
+    def rename_user(self, old_username, new_username):
+        """Rename a user and update denormalized fighter_matches rows. Returns status string."""
+        old_username = (old_username or "").strip()
+        if not old_username:
+            return "skipped: empty old username"
+        new_username = self.validate_username(new_username)
+        with self.lock:
+            row = self.db.execute("SELECT id, username FROM users WHERE username = ?", (old_username,)).fetchone()
+            if not row:
+                return f"not_found: {old_username}"
+            if row["username"] == new_username:
+                return f"unchanged: {new_username}"
+            if self.db.execute("SELECT 1 FROM users WHERE username = ?", (new_username,)).fetchone():
+                return f"taken: {new_username}"
+            old = row["username"]
+            with self._tx() as db:
+                db.execute("UPDATE users SET username=? WHERE id=?", (new_username, row["id"]))
+                db.execute("UPDATE fighter_matches SET player_username=? WHERE player_username=?", (new_username, old))
+                db.execute("UPDATE fighter_matches SET opponent_username=? WHERE opponent_username=?", (new_username, old))
+                db.execute("UPDATE fighter_matches SET winner=? WHERE winner=?", (new_username, old))
+            return f"renamed: {old} -> {new_username} (id={row['id']})"
+
+    def migrate_google_numeric_usernames(self):
+        """Privacy: Google-linked users whose public name is not u###### get a numeric handle."""
+        import secrets
+        numeric = re.compile(r"^u\d{6}$")
+        changed = []
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id, username FROM users WHERE google_sub IS NOT NULL AND google_sub != ''"
+            ).fetchall()
+            for row in rows:
+                old = row["username"]
+                if numeric.match(old or ""):
+                    continue
+                new = None
+                for _ in range(64):
+                    cand = "u" + f"{secrets.randbelow(1_000_000):06d}"
+                    if not self.db.execute("SELECT 1 FROM users WHERE username = ?", (cand,)).fetchone():
+                        new = cand
+                        break
+                if not new:
+                    new = "u" + secrets.token_hex(3)
+                with self._tx() as db:
+                    db.execute("UPDATE users SET username=? WHERE id=?", (new, row["id"]))
+                    db.execute("UPDATE fighter_matches SET player_username=? WHERE player_username=?", (new, old))
+                    db.execute("UPDATE fighter_matches SET opponent_username=? WHERE opponent_username=?", (new, old))
+                    db.execute("UPDATE fighter_matches SET winner=? WHERE winner=?", (new, old))
+                changed.append(f"{old}->{new}")
+        return changed
+
     def list_users(self):
         return [r["username"] for r in self.db.execute("SELECT username FROM users ORDER BY username")]
 

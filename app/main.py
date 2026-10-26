@@ -58,6 +58,15 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     removed = auth.migrate_legacy_users()
     if removed:
         print(f"[migration] removed legacy password-less users: {removed}", flush=True)
+    renamed = engine.migrate_google_numeric_usernames()
+    if renamed:
+        print(f"[migration] google privacy usernames: {renamed}", flush=True)
+    # One-shot admin rename via env (set RENAME_USER_FROM + RENAME_USER_TO, redeploy, then unset).
+    ren_from = os.environ.get("RENAME_USER_FROM", "").strip()
+    ren_to = os.environ.get("RENAME_USER_TO", "").strip()
+    if ren_from and ren_to:
+        status = engine.rename_user(ren_from, ren_to)
+        print(f"[admin] RENAME_USER {ren_from!r} -> {ren_to!r}: {status}", flush=True)
     # One-shot admin delete via env (set DELETE_USER_USERNAME[+EMAIL], redeploy, then unset).
     del_user = os.environ.get("DELETE_USER_USERNAME", "").strip()
     if del_user:
