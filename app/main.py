@@ -648,6 +648,11 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
             return RedirectResponse("/login", status_code=303)
         return FileResponse(STATIC / "fighter.html", headers={"Cache-Control": "no-store"})
 
+    @app.get("/admin")
+    def admin_page():
+        """Admin privacy wipe UI. Operator pastes X-Admin-Key in-page; never hardcode."""
+        return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-store"})
+
     @app.get("/login")
     @app.get("/register")
     def login_page(request: Request):
