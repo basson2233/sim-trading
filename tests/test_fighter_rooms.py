@@ -135,3 +135,50 @@ def test_fighter_result_accepts_online(feed):
         "player_kos": 2, "opponent_kos": 0,
     })
     assert r.status_code == 200 and r.json()["ok"] is True
+
+
+def test_list_public_filters():
+    store = RoomStore()
+    priv = store.create("alice", map_id="hkex", public=False)
+    pub = store.create("bob", map_id="vault", public=True)
+    full = store.create("carol", map_id="hkex", public=True)
+    store.join(full.room_code, "dave")
+    # Force waiting even with 2 players (not both ready)
+    assert full.status == "waiting"
+    rows = store.list_public()
+    codes = {r["code"] for r in rows}
+    assert pub.room_code in codes
+    assert priv.room_code not in codes
+    assert full.room_code not in codes  # full (2 players)
+    row = next(r for r in rows if r["code"] == pub.room_code)
+    assert row["host"]["username"] == "bob"
+    assert row["players"] == 1
+    assert row["status"] == "waiting"
+    assert row["mapId"] == "vault"
+    assert row["room_code"] == pub.room_code
+
+
+def test_http_public_rooms(feed):
+    app = create_app(db_path=":memory:", feed=feed, pending_interval=0)
+    a, b = client(app), client(app)
+    assert register(a, "alice").status_code == 200
+    assert register(b, "bob").status_code == 200
+    assert a.get("/api/fighter/rooms/public").status_code == 200
+    assert a.get("/api/fighter/rooms/public").json() == {"rooms": []}
+
+    with a.websocket_connect("/api/fighter/room/ws") as ws:
+        ws.send_json({"type": "create", "mapId": "hkex", "public": True})
+        created = ws.receive_json()
+        assert created["public"] is True
+        code = created["code"]
+        listing = b.get("/api/fighter/rooms/public").json()
+        assert len(listing["rooms"]) == 1
+        assert listing["rooms"][0]["code"] == code
+        assert listing["rooms"][0]["host"]["username"] == "alice"
+        assert listing["rooms"][0]["players"] == 1
+        assert listing["rooms"][0]["status"] == "waiting"
+
+        ws.send_json({"type": "list"})
+        msg = ws.receive_json()
+        assert msg["type"] == "rooms"
+        assert msg["rooms"][0]["code"] == code

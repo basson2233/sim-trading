@@ -381,6 +381,11 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     def fighter_history(user=Depends(current_user)):
         return {"rows": engine.recent_fighter_matches(user["username"])}
 
+    @app.get("/api/fighter/rooms/public")
+    def fighter_public_rooms(user=Depends(current_user)):
+        """List joinable public lobbies (waiting, not full). Auth required."""
+        return {"rooms": app.state.rooms.list_public()}
+
     # ------------------------------------------------------------- 聯機房間 (WebSocket)
     @app.websocket("/api/fighter/room/ws")
     async def fighter_room_ws(websocket: WebSocket):
@@ -443,14 +448,21 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
                 try:
                     if typ == "create":
                         map_id = raw.get("mapId") or raw.get("map_id")
+                        is_public = bool(raw.get("public", False))
                         if room_code:
                             left = rooms.leave(room_code, username)
                             if left:
                                 await rooms.broadcast_views(left, "room")
-                        room = rooms.create(username, map_id=map_id)
+                        room = rooms.create(username, map_id=map_id, public=is_public)
                         room_code = room.room_code
                         rooms.attach_ws(room, username, websocket)
                         await websocket.send_json(room.client_view(username))
+
+                    elif typ == "list":
+                        await websocket.send_json({
+                            "type": "rooms",
+                            "rooms": rooms.list_public(),
+                        })
 
                     elif typ == "join":
                         code = (raw.get("code") or raw.get("room_code") or "").strip().upper()

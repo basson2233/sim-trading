@@ -23,9 +23,10 @@ All messages are JSON objects with a `type` field.
 ### `create`
 
 Create a room; sender becomes **host**. Optional map from the lobby picker.
+Pass `"public": true` to list the room on the public lobby; default `false` (code-only).
 
 ```json
-{ "type": "create", "mapId": "hkex", "map_id": "hkex" }
+{ "type": "create", "mapId": "hkex", "map_id": "hkex", "public": true }
 ```
 
 ### `join`
@@ -61,6 +62,16 @@ Host may force start once both are ready (same payload as auto-start). Optional 
 ```json
 { "type": "leave" }
 ```
+
+### `list`
+
+Ask for joinable **public** lobbies (same filter as the HTTP list).
+
+```json
+{ "type": "list" }
+```
+
+→ `{ "type": "rooms", "rooms": [ … ] }` (shape below).
 
 ### `ping`
 
@@ -147,6 +158,53 @@ Frontend should call `showArena` / `beginFight` like classmate mode (`mode: "onl
 ```json
 { "type": "error", "message": "房間不存在或已過期" }
 ```
+
+## Public room list
+
+### HTTP
+
+```
+GET /api/fighter/rooms/public
+```
+
+Auth required (session cookie). Returns only **public** rooms that are `waiting` and have fewer than 2 players:
+
+```json
+{
+  "rooms": [
+    {
+      "code": "AB3K7Q",
+      "room_code": "AB3K7Q",
+      "host": { "username": "alice", "display_name": "alice" },
+      "mapId": "hkex",
+      "map_id": "hkex",
+      "players": 1,
+      "status": "waiting"
+    }
+  ]
+}
+```
+
+### WS `rooms` (reply to `list`)
+
+```json
+{
+  "type": "rooms",
+  "rooms": [
+    {
+      "code": "AB3K7Q",
+      "room_code": "AB3K7Q",
+      "host": { "username": "alice", "display_name": "alice" },
+      "mapId": "hkex",
+      "map_id": "hkex",
+      "players": 1,
+      "status": "waiting"
+    }
+  ]
+}
+```
+
+Private rooms (`public: false` / omitted on create) never appear here; join them with the 6-char code only.
 
 ## Room rules
 

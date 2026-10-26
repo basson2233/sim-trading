@@ -67,6 +67,7 @@ class Room:
     players: dict[str, RoomPlayer] = field(default_factory=dict)
     status: str = STATUS_WAITING
     map_id: Optional[str] = None
+    is_public: bool = False
     created_at: float = field(default_factory=_now)
     last_activity: float = field(default_factory=_now)
 
@@ -118,7 +119,23 @@ class Room:
             "guest": self._seat(self.guest_name()),
             "mapId": self.map_id,
             "map_id": self.map_id,
+            "public": self.is_public,
             "you_ready": bool(me.ready) if me else False,
+        }
+
+    def list_item(self) -> dict[str, Any]:
+        """Public lobby row (HTTP list + WS type rooms)."""
+        return {
+            "code": self.room_code,
+            "room_code": self.room_code,
+            "host": {
+                "username": self.host,
+                "display_name": self.host,
+            },
+            "mapId": self.map_id,
+            "map_id": self.map_id,
+            "players": len(self.players),
+            "status": self.status,
         }
 
     def ready_view(self, for_username: str) -> dict[str, Any]:
@@ -155,7 +172,8 @@ class RoomStore:
             return None
         return room
 
-    def create(self, host_username: str, map_id: Optional[str] = None) -> Room:
+    def create(self, host_username: str, map_id: Optional[str] = None,
+               public: bool = False) -> Room:
         self.purge_expired()
         self._leave_all(host_username)
         for _ in range(32):
@@ -169,6 +187,7 @@ class RoomStore:
             room_code=code,
             host=host_username,
             map_id=map_id or None,
+            is_public=bool(public),
         )
         room.players[host_username] = RoomPlayer(username=host_username)
         self._rooms_by_code[code] = room
@@ -227,6 +246,23 @@ class RoomStore:
             room.recompute_status()
         room.touch()
         return room
+
+    def list_public(self) -> list[dict[str, Any]]:
+        """Joinable public lobbies: waiting and not full."""
+        self.purge_expired()
+        rows = []
+        for room in self._rooms_by_code.values():
+            if not room.is_public:
+                continue
+            if room.status != STATUS_WAITING:
+                continue
+            if len(room.players) >= MAX_PLAYERS:
+                continue
+            if not room.players:
+                continue
+            rows.append((room.created_at, room.list_item()))
+        rows.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in rows]
 
     def mark_fighting(self, room: Room, map_id: Optional[str] = None) -> None:
         room.status = STATUS_FIGHTING
