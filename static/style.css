@@ -92,3 +92,38 @@ button.user-link,a.user-link{
   text-underline-offset:2px
 }
 button.user-link:hover{color:#93c5fd}
+
+/* ---- curriculum / learn ---- */
+.learn-layout{display:grid;grid-template-columns:1fr 280px;gap:12px;align-items:start}
+@media(max-width:960px){.learn-layout{grid-template-columns:1fr}}
+.learn-subtabs{margin:0 0 14px}
+.learn-pane{line-height:1.65}
+.md-body h1{font-size:20px;margin:0 0 14px}
+.md-body h2{font-size:16px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.md-body h3{font-size:14px;margin:16px 0 6px}
+.md-body p{margin:0 0 10px}
+.md-body ul,.md-body ol{margin:0 0 12px;padding-left:1.3em}
+.md-body li{margin:4px 0}
+.md-body table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0 14px}
+.md-body th,.md-body td{border:1px solid var(--line);padding:6px 8px;text-align:left}
+.md-body th{background:#0b0f14;color:var(--muted);font-weight:500}
+.md-body strong{color:#fff}
+.md-body code{background:#0b0f14;padding:1px 5px;border-radius:4px;font-size:12px}
+.learn-side .chips{margin:10px 0 14px}
+.learn-side-status{font-size:13px;line-height:1.6;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px}
+.mc-q{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;background:#0b0f14}
+.mc-q h4{margin:0 0 8px;font-size:14px}
+.mc-choice{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;cursor:pointer;border-radius:6px}
+.mc-choice:hover{background:#1b2230}
+.mc-choice input{margin-top:3px;flex-shrink:0;width:auto}
+.mc-explain{margin-top:8px;padding:8px 10px;border-radius:6px;font-size:13px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35)}
+.mc-q.correct{border-color:rgba(22,199,132,.5)}
+.mc-q.wrong{border-color:rgba(234,57,67,.5)}
+.mc-result{padding:12px;border-radius:8px;margin-bottom:12px;border:1px solid var(--line)}
+.mc-result.pass{background:rgba(22,199,132,.12);border-color:rgba(22,199,132,.4)}
+.mc-result.fail{background:rgba(234,57,67,.12);border-color:rgba(234,57,67,.4)}
+.comp-row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.comp-row:last-child{border-bottom:0}
+.comp-ok{color:var(--up)}.comp-no{color:var(--down)}.comp-wait{color:var(--warn)}
+.chip.in-pool{border-color:var(--accent)}
+.chip.held{background:rgba(22,199,132,.15);border-color:var(--up)}

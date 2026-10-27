@@ -343,10 +343,19 @@ async function viewUserPortfolio(username) {
 function showTab(name) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $("#tab-trade").classList.toggle("hidden", name !== "trade");
+  const learn = $("#tab-learn");
+  if (learn) learn.classList.toggle("hidden", name !== "learn");
   $("#tab-leaderboard").classList.toggle("hidden", name !== "leaderboard");
-  if (name === "leaderboard") loadLeaderboard(); else drawChart();
+  if (name === "leaderboard") loadLeaderboard();
+  else if (name === "learn" && typeof loadLearnTab === "function") loadLearnTab();
+  else drawChart();
 }
-function route() { showTab(location.hash === "#leaderboard" || location.pathname === "/leaderboard" ? "leaderboard" : "trade"); }
+function route() {
+  const h = location.hash;
+  if (h === "#leaderboard" || location.pathname === "/leaderboard") showTab("leaderboard");
+  else if (h === "#learn" || location.pathname === "/learn") showTab("learn");
+  else showTab("trade");
+}
 function seg(id, key, after) {
   $(id).addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
