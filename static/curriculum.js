@@ -107,6 +107,7 @@ function applyDrawFromBank() {
     passScore: bank.passScore || 5,
     total: qs.length,
     drawCount: drawN,
+    bankSize: (bank.questions || []).length,
     universe: bank.universe || [],
     compliance: bank.compliance,
     questions: qs,
@@ -203,6 +204,8 @@ async function fetchCurriculum() {
       title: data.title,
       passScore: data.passScore,
       total: data.total != null ? data.total : qs.length,
+      drawCount: data.drawCount != null ? data.drawCount : (data.total != null ? data.total : qs.length),
+      bankSize: data.bankSize != null ? data.bankSize : null,
       universe: data.universe || [],
       compliance: data.compliance,
       questions: qs,
@@ -272,6 +275,13 @@ function renderMcForm() {
   const locked = hasDetails;
   let html = "";
 
+  const drawN = mc.drawCount || mc.total || 7;
+  const bankN = mc.bankSize;
+  const poolHint = bankN
+    ? `每次隨機抽 ${drawN}／題庫 ${bankN}（及格 ≥${mc.passScore || 5}）`
+    : `每次隨機抽 ${drawN} 題（及格 ≥${mc.passScore || 5}）`;
+  html += `<div class="muted small-text" style="margin-bottom:10px">${poolHint}</div>`;
+
   if (prev && prev.score != null) {
     const pass = !!prev.passed;
     html += `<div class="mc-result ${pass ? "pass" : "fail"}">
@@ -279,7 +289,7 @@ function renderMcForm() {
       ${prev.at ? `<div class="muted" style="margin-top:4px">提交：${esc(prev.at)}</div>` : ""}
       <div class="muted" style="margin-top:4px">${CURRICULUM.fromApi
         ? "已交伺服器計分"
-        : `本地隨機練習（題庫抽 ${mc.total || 7} 題）`}</div>
+        : `本地隨機練習（抽 ${drawN}${bankN ? "／" + bankN : ""}）`}</div>
       <div style="margin-top:8px"><button type="button" class="btn ghost small" id="mcRetryBtn">再答一次</button></div>
     </div>`;
   }
