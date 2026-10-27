@@ -376,6 +376,7 @@
   const RoomNet = (() => {
     let ws = null;
     let state = null;
+    let inputSeq = 0;
 
     function wsUrl() {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -463,6 +464,22 @@
       return true;
     }
 
+    /** PvP input sync — silent if WS not open (no toast spam). */
+    function sendInput(keysObj) {
+      if (!ws || ws.readyState !== 1) return false;
+      inputSeq += 1;
+      try {
+        ws.send(JSON.stringify({ type: "input", seq: inputSeq, keys: keysObj || {} }));
+      } catch (_) {
+        return false;
+      }
+      return true;
+    }
+
+    function isConnected() {
+      return !!(ws && ws.readyState === 1);
+    }
+
     function connect(onOpen) {
       return new Promise((resolve, reject) => {
         try {
@@ -521,6 +538,14 @@
                 roomCode: state && state.code,
                 role: state && state.role,
               });
+              return;
+            }
+            if (t === "peer_input") {
+              // Keep WS open during fight; apply remote keys to P2 (no AI).
+              if (typeof Game !== "undefined" && Game.applyPeerInput) {
+                Game.applyPeerInput(msg.keys || {}, msg.seq);
+              }
+              return;
             }
           };
           ws.onerror = () => setMsg("WebSocket 連線失敗（後端未就緒或網絡問題）", true);
@@ -576,7 +601,16 @@
       if (typeof loadPublicRooms === "function") loadPublicRooms();
     }
 
-    return { create, join, ready, leave, close, getState: () => state };
+    return {
+      create,
+      join,
+      ready,
+      leave,
+      close,
+      getState: () => state,
+      sendInput,
+      isConnected,
+    };
   })();
 
   const btnCreateRoom = $("#btnCreateRoom");
@@ -883,6 +917,11 @@
     let matchMeta = null;
     let particles = [];
     let aiState = { cool: 0, jumpCool: 0 };
+    let peerKeys = { left: false, right: false, up: false, down: false, light: false, heavy: false };
+    let peerKeysPrev = { left: false, right: false, up: false, down: false, light: false, heavy: false };
+    let peerSeq = 0;
+    let virtPulse = { up: 0, light: 0, heavy: 0 }; // ticks to hold virt one-shots for net sync
+    let lastSentKeysJson = "";
     let mapState = null; // live platforms + blast + spawn
     let tick = 0;
     let lastFrameTs = 0;
@@ -1047,7 +1086,8 @@
       kosToWin = 2;
       stocks = { p1: kosToWin, p2: kosToWin };
       p1 = fighter(meta.player, mapState.spawn.p1x, 1, "#3b82f6", false);
-      p2 = fighter(meta.opponent, mapState.spawn.p2x, -1, "#ea3943", true);
+      const onlinePvp = meta.mode === "online";
+      p2 = fighter(meta.opponent, mapState.spawn.p2x, -1, "#ea3943", !onlinePvp);
       roundLock = 90;
       tick = 0;
       lastFrameTs = 0;
@@ -1057,6 +1097,11 @@
       running = true;
       keys = {};
       aiState = { cool: 0, jumpCool: 0 };
+      peerKeys = { left: false, right: false, up: false, down: false, light: false, heavy: false };
+      peerKeysPrev = { left: false, right: false, up: false, down: false, light: false, heavy: false };
+      peerSeq = 0;
+      virtPulse = { up: 0, light: 0, heavy: 0 };
+      lastSentKeysJson = "";
       const pad = $("#virtPad");
       if (pad) pad.querySelectorAll(".virt-btn.pressed").forEach((b) => b.classList.remove("pressed"));
       resetRoundPositions();
@@ -1220,12 +1265,17 @@
         const action = btn.dataset.action;
         if (key) setHeldKey(key, true);
         if (!running || !p1) return;
-        if (action === "jump") tryJump(p1);
+        if (action === "jump") {
+          tryJump(p1);
+          virtPulse.up = 3;
+        }
         if (action === "attack") {
           tryAttack(p1, false);
+          virtPulse.light = 3;
         }
         if (action === "smash") {
           tryAttack(p1, true);
+          virtPulse.heavy = 3;
         }
       };
 
@@ -1310,7 +1360,13 @@
       }
 
       // Crouch light (hold ↓ / S on ground) — read keys too so same-frame ↓+Z works
-      const holdDown = !f.isAI && (keys["ArrowDown"] || keys["s"] || keys["S"]);
+      // Online P2 uses peerKeys.down (not local keys / isAI gate).
+      let holdDown = false;
+      if (f === p1) {
+        holdDown = !!(keys["ArrowDown"] || keys["s"] || keys["S"]);
+      } else if (matchMeta && matchMeta.mode === "online" && !f.isAI) {
+        holdDown = !!peerKeys.down;
+      }
       if (f.onGround && (f.crouching || holdDown)) {
         if (f.stamina < STAMINA_COST_CROUCH) return false;
         f.stamina -= STAMINA_COST_CROUCH;
@@ -1702,6 +1758,104 @@
       }
     }
 
+    function snapshotLocalKeys() {
+      return {
+        left: !!(keys["ArrowLeft"] || keys["a"] || keys["A"]),
+        right: !!(keys["ArrowRight"] || keys["d"] || keys["D"]),
+        up: !!(keys["ArrowUp"] || keys["w"] || keys["W"] || virtPulse.up > 0),
+        down: !!(keys["ArrowDown"] || keys["s"] || keys["S"]),
+        light: !!(keys["z"] || keys["Z"] || keys[" "] || keys["j"] || keys["J"] || virtPulse.light > 0),
+        heavy: !!(keys["k"] || keys["K"] || virtPulse.heavy > 0),
+      };
+    }
+
+    function applyPeerInput(keysIn, seq) {
+      if (!keysIn || typeof keysIn !== "object") keysIn = {};
+      if (seq != null && seq !== "" && Number(seq) < peerSeq) return;
+      if (seq != null && seq !== "") peerSeq = Number(seq) || peerSeq;
+      peerKeys = {
+        left: !!keysIn.left,
+        right: !!keysIn.right,
+        up: !!keysIn.up,
+        down: !!keysIn.down,
+        light: !!keysIn.light,
+        heavy: !!keysIn.heavy,
+      };
+    }
+
+    function controlP2Online() {
+      const f = p2;
+      const cur = peerKeys;
+      const prev = peerKeysPrev;
+      const finish = () => {
+        peerKeysPrev = {
+          left: !!cur.left,
+          right: !!cur.right,
+          up: !!cur.up,
+          down: !!cur.down,
+          light: !!cur.light,
+          heavy: !!cur.heavy,
+        };
+      };
+      if (!f) {
+        finish();
+        return;
+      }
+      if (f.hitstun > 0) {
+        finish();
+        return;
+      }
+      if (f.atkTimer > 0 && f.atkKind === "heavy") {
+        finish();
+        return;
+      }
+      // Rising edges → jump / attacks (mirror local keydown behavior)
+      if (cur.up && !prev.up) tryJump(f);
+      if (cur.light && !prev.light) tryAttack(f, false);
+      if (cur.heavy && !prev.heavy) tryAttack(f, true);
+
+      f.crouching = !!(f.onGround && cur.down && f.atkTimer <= 0);
+      const left = !!cur.left;
+      const right = !!cur.right;
+      if (f.crouching) {
+        f.running = false;
+        f.runDir = 0;
+        if (left) f.facing = -1;
+        if (right) f.facing = 1;
+        finish();
+        return;
+      }
+      const base = f.onGround ? f.moveSpd : f.airSpd;
+      const spd = f.running ? f.moveSpd * RUN_SPD_MULT : base;
+      if (left) {
+        f.vx = -spd;
+        f.facing = -1;
+      }
+      if (right) {
+        f.vx = spd;
+        f.facing = 1;
+      }
+      if (!left && !right && f.running) {
+        f.running = false;
+        f.runDir = 0;
+      }
+      finish();
+    }
+
+    function maybeSendOnlineInput() {
+      if (!matchMeta || matchMeta.mode !== "online" || !running) return;
+      if (virtPulse.up > 0) virtPulse.up--;
+      if (virtPulse.light > 0) virtPulse.light--;
+      if (virtPulse.heavy > 0) virtPulse.heavy--;
+      const snap = snapshotLocalKeys();
+      const json = JSON.stringify(snap);
+      // Every 3 sim ticks, or immediately on change (lockstep-lite MVP)
+      if (json !== lastSentKeysJson || tick % 3 === 0) {
+        RoomNet.sendInput(snap);
+        lastSentKeysJson = json;
+      }
+    }
+
     function checkKO(f, who) {
       const BLAST = mapState.blast;
       if (f.x + f.w < BLAST.left || f.x > BLAST.right || f.y > BLAST.bottom || f.y + f.h < BLAST.top) {
@@ -1919,7 +2073,7 @@
 
     function drawHeavyLaser(f) {
       if (f.atkKind !== "heavy" || f.atkTimer <= 0 || f.atkTimer > HEAVY_LASER_FRAMES) return;
-      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const set = f === p2 ? sprites.p2 : sprites.p1;
       const img = set.heavy_laser;
       if (!(img && img.complete && img.naturalWidth > 0)) return;
       const box = attackBox(f);
@@ -1950,7 +2104,7 @@
       const dur = f.atkDuration || CROUCH_ATK_DURATION;
       const elapsed = Math.max(0, dur - f.atkTimer);
       if (elapsed < CROUCH_FX_START || elapsed >= CROUCH_FX_START + CROUCH_FX_DURATION) return;
-      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const set = f === p2 ? sprites.p2 : sprites.p1;
       const img = set.crouch_fx;
       if (!(img && img.complete && img.naturalWidth > 0)) return;
       const ahead = CROUCH_FX_AHEAD * f.w;
@@ -1976,7 +2130,7 @@
       const blink = f.invuln > 0 && Math.floor(f.invuln / 3) % 2 === 0;
       if (blink) return;
 
-      const set = f.isAI ? sprites.p2 : sprites.p1;
+      const set = f === p2 ? sprites.p2 : sprites.p1;
       const key = pickSpriteKey(f);
       const img = set[key] || set.idle;
       const cx = f.x + f.w / 2;
@@ -2109,8 +2263,11 @@
       }
       ctx.fillStyle = "rgba(0,0,0,.55)";
       ctx.font = "11px sans-serif";
-      const label = f.isAI ? "AI" : "YOU";
-      ctx.fillText(label, f.x + f.w / 2 - 10, f.y - 14);
+      let label = "YOU";
+      if (f === p2) {
+        label = matchMeta && matchMeta.mode === "online" && !f.isAI ? "對手" : "AI";
+      }
+      ctx.fillText(label, f.x + f.w / 2 - (label === "對手" ? 12 : 10), f.y - 14);
     }
 
     function simStep() {
@@ -2118,6 +2275,8 @@
       if (roundLock > 0) {
         // still animate platforms during countdown for visual life
         updateMovingPlatforms();
+        // Keep pumping input while room is already "fighting" so peerKeys are warm at unlock
+        maybeSendOnlineInput();
         roundLock--;
         if (roundLock === 30) $("#roundMsg").textContent = "開始！";
         if (roundLock === 0) $("#roundMsg").textContent = "擊飛出界！";
@@ -2125,7 +2284,9 @@
       }
       updateMovingPlatforms();
       controlP1();
-      controlAI();
+      if (p2 && p2.isAI) controlAI();
+      else if (matchMeta && matchMeta.mode === "online") controlP2Online();
+      maybeSendOnlineInput();
       physics(p1);
       physics(p2);
       resolveBodyCollision(p1, p2);
@@ -2164,7 +2325,15 @@
       draw();
     }
 
-    return { start, stop, refreshVirtPad, MAPS, ensureSprites, get spritesReady() { return spritesReady; } };
+    return {
+      start,
+      stop,
+      refreshVirtPad,
+      MAPS,
+      ensureSprites,
+      applyPeerInput,
+      get spritesReady() { return spritesReady; },
+    };
   })();
 
   // expose map catalog for tests / debugging
