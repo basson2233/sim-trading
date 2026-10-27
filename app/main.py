@@ -24,10 +24,12 @@ from .rooms import STATUS_FIGHTING, RoomStore, public_fighter
 from .curriculum import (
     CURRENT_WEEK_ID,
     CurriculumError,
+    draw_questions,
     lesson_path_rel,
     load_lesson_markdown,
     load_mc,
     public_questions,
+    public_title,
 )
 
 log = logging.getLogger("sim-trading")
@@ -749,18 +751,23 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
 
     @app.get("/api/curriculum/week/current")
     def curriculum_week_current(user=Depends(current_user)):
-        """Active week: lesson + universe + questions (answers stripped) + user MC status."""
+        """Active module: lesson + universe + random-draw MC (answers stripped) + user status."""
         def _cur():
             mc = load_mc(CURRENT_WEEK_ID)
+            drawn = draw_questions(mc)
+            draw_count = int(mc.get("drawCount") or 7)
             return {
+                # weekId is an internal compliance/boost key — not a user-facing "Week 1" label
                 "weekId": mc.get("weekId") or CURRENT_WEEK_ID,
-                "title": mc.get("title"),
+                "title": public_title(mc),
                 "lesson": load_lesson_markdown(CURRENT_WEEK_ID),
                 "lessonPath": lesson_path_rel(CURRENT_WEEK_ID),
                 "universe": list(mc.get("universe") or []),
                 "passScore": int(mc.get("passScore") or 5),
-                "total": int(mc.get("total") or len(mc.get("questions") or [])),
-                "questions": public_questions(mc),
+                "total": draw_count,
+                "drawCount": draw_count,
+                "mode": mc.get("mode") or "random",
+                "questions": public_questions(drawn),
                 "compliance": mc.get("compliance") or {},
                 "userStatus": engine.curriculum_user_status(user["username"], CURRENT_WEEK_ID),
             }

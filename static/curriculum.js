@@ -102,10 +102,11 @@ function applyDrawFromBank() {
   const drawN = bank.drawCount || 7;
   const qs = sampleQuestions(bank.questions || [], drawN);
   CURRICULUM.mc = {
-    weekId: bank.bankId || CURRICULUM.weekId,
+    weekId: CURRICULUM.weekId, // keep internal compliance key
     title: bank.title || "基本面選股入門",
     passScore: bank.passScore || 5,
     total: qs.length,
+    drawCount: drawN,
     universe: bank.universe || [],
     compliance: bank.compliance,
     questions: qs,
@@ -113,9 +114,8 @@ function applyDrawFromBank() {
     userStatus: (CURRICULUM.mc && CURRICULUM.mc.userStatus) || {},
   };
   CURRICULUM.answersKey = Object.fromEntries(
-    qs.map((q) => [q.id, { answer: q.answer, explain: q.explain }])
+    (bank.questions || []).map((q) => [q.id, { answer: q.answer, explain: q.explain }])
   );
-  CURRICULUM.weekId = CURRICULUM.mc.weekId || CURRICULUM.weekId;
 }
 
 function reshuffleActiveQuestions() {
@@ -318,10 +318,21 @@ function renderMcForm() {
   }
   const retry = $("#mcRetryBtn");
   if (retry) {
-    retry.onclick = () => {
+    retry.onclick = async () => {
       CURRICULUM.lastSubmit = null;
       try { localStorage.removeItem(attemptKey()); } catch {}
-      reshuffleActiveQuestions();
+      // API: re-GET for a fresh server-side draw; static: re-sample from bank
+      if (CURRICULUM.fromApi) {
+        try {
+          await fetchCurriculum();
+          renderLesson();
+        } catch (err) {
+          toast(err.message || "無法重新抽題");
+          reshuffleActiveQuestions();
+        }
+      } else {
+        reshuffleActiveQuestions();
+      }
       renderMcForm();
       updateSideSummary();
     };

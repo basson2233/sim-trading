@@ -1,11 +1,18 @@
-"""Week1 curriculum MC, compliance (P1–P2), and 1% boost."""
+"""Fundamentals curriculum: random-draw MC, compliance (P1–P2), and 1% boost."""
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.curriculum import CURRENT_WEEK_ID, load_mc, score_answers
-from app.engine import DEFAULT_INITIAL_CASH
+from app.curriculum import (
+    CURRENT_WEEK_ID,
+    CurriculumError,
+    draw_questions,
+    load_lesson_markdown,
+    load_mc,
+    public_title,
+    score_answers,
+)
 from app.main import create_app
 
 PW = "secret-pass-1"
@@ -28,59 +35,112 @@ def register(c, name, pw=PW, email=None):
     })
 
 
-def correct_answers():
+def bank_answers():
     mc = load_mc(WEEK)
     return {q["id"]: q["answer"] for q in mc["questions"]}
 
 
-def test_score_answers_unit():
+def answers_for_ids(qids):
+    bank = bank_answers()
+    return {qid: bank[qid] for qid in qids}
+
+
+def test_bank_and_draw_unit():
     mc = load_mc(WEEK)
-    perfect = score_answers(mc, correct_answers())
+    assert mc["drawCount"] == 7 and mc["passScore"] == 5
+    assert mc["bankSize"] >= 20
+    assert len(mc["questions"]) == mc["bankSize"]
+    drawn = draw_questions(mc)
+    assert len(drawn) == 7
+    ids = {q["id"] for q in drawn}
+    assert len(ids) == 7
+    bank_ids = {q["id"] for q in mc["questions"]}
+    assert ids <= bank_ids
+    # order / membership not fixed across draws (very likely over many trials)
+    seen = {tuple(q["id"] for q in draw_questions(mc)) for _ in range(24)}
+    assert len(seen) >= 2
+
+
+def test_score_answers_by_id_not_bank_size():
+    mc = load_mc(WEEK)
+    bank = bank_answers()
+    sample_ids = [q["id"] for q in mc["questions"][:7]]
+    perfect = score_answers(mc, {i: bank[i] for i in sample_ids})
     assert perfect["score"] == 7 and perfect["passed"] is True and perfect["total"] == 7
-    zero = score_answers(mc, {q["id"]: "Z" for q in mc["questions"]})
+
+    zero = score_answers(mc, {i: "Z" for i in sample_ids})
     assert zero["score"] == 0 and zero["passed"] is False
-    partial = correct_answers()
-    partial["q1"] = "A"
-    partial["q2"] = "A"
-    got = score_answers(mc, partial)
+
+    # partial: 5 correct of 7 → pass
+    ans = {i: bank[i] for i in sample_ids}
+    ans[sample_ids[0]] = "Z"
+    ans[sample_ids[1]] = "Z"
+    got = score_answers(mc, ans)
     assert got["score"] == 5 and got["passed"] is True
 
+    # cannot submit whole bank to inflate score
+    with pytest.raises(CurriculumError):
+        score_answers(mc, bank)
 
-def test_current_week_strips_answers(app):
+
+def test_public_title_and_lesson_have_no_week1():
+    mc = load_mc(WEEK)
+    title = public_title(mc)
+    assert "Week" not in title and "week1" not in title.lower()
+    assert "基本面" in title
+    lesson = load_lesson_markdown(WEEK)
+    assert "Week 1" not in lesson and "Week1" not in lesson
+    assert "基本面" in lesson
+
+
+def test_current_week_random_draw_strips_answers(app):
     c = client(app)
     assert c.get("/api/curriculum/week/current").status_code == 401
     register(c, "alice")
     r = c.get("/api/curriculum/week/current")
     assert r.status_code == 200
     body = r.json()
-    assert body["weekId"] == WEEK
+    assert body["weekId"] == WEEK  # internal key
     assert "基本面" in body["title"]
-    assert "基本面分析" in body["lesson"]
+    assert "Week 1" not in body["title"] and "Week1" not in body["title"]
+    assert "Week 1" not in body["lesson"] and "Week1" not in body["lesson"]
     assert body["universe"] == ["AAPL", "MSFT", "JNJ", "PG", "JPM", "XOM", "SPY"]
-    assert body["passScore"] == 5 and body["total"] == 7
+    assert body["passScore"] == 5 and body["total"] == 7 and body["drawCount"] == 7
+    assert body.get("mode") == "random"
     assert len(body["questions"]) == 7
     for q in body["questions"]:
         assert "answer" not in q and "explain" not in q
         assert q["id"] and q["stem"] and q["choices"]
     assert body["userStatus"] == {"mcScore": None, "mcPassed": False, "submitted": False}
 
+    # second GET very likely different order / set
+    orders = [tuple(q["id"] for q in c.get("/api/curriculum/week/current").json()["questions"]) for _ in range(12)]
+    assert len(set(orders)) >= 2
+
 
 def test_submit_scoring_and_leaderboard(app):
     c = client(app)
     register(c, "alice")
-    bad = c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": {"q1": "A"}})
+    cur = c.get("/api/curriculum/week/current").json()
+    qids = [q["id"] for q in cur["questions"]]
+
+    bad = c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": {qids[0]: "Z"}})
     assert bad.status_code == 200
     assert bad.json()["score"] < 5 and bad.json()["passed"] is False
-    # answers leaked only after submit
-    assert bad.json()["details"][0]["answer"] == "B"
+    # answers leaked only after submit, graded by id
+    detail0 = next(d for d in bad.json()["details"] if d["id"] == qids[0])
+    assert detail0["answer"] and detail0["correct"] is False
 
-    good = c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": correct_answers()})
+    good = c.post(
+        f"/api/curriculum/week/{WEEK}/submit",
+        json={"answers": answers_for_ids(qids)},
+    )
     assert good.status_code == 200
     g = good.json()
     assert g["score"] == 7 and g["passed"] is True and g["total"] == 7
 
-    cur = c.get("/api/curriculum/week/current").json()
-    assert cur["userStatus"] == {"mcScore": 7, "mcPassed": True, "submitted": True}
+    cur2 = c.get("/api/curriculum/week/current").json()
+    assert cur2["userStatus"] == {"mcScore": 7, "mcPassed": True, "submitted": True}
 
     board = c.get(f"/api/curriculum/week/{WEEK}/leaderboard").json()
     assert board["weekId"] == WEEK and board["topRewardUsd"] == 1000
@@ -90,7 +150,9 @@ def test_submit_scoring_and_leaderboard(app):
 def test_compliance_false_without_holdings(app):
     c = client(app)
     register(c, "alice")
-    c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": correct_answers()})
+    cur = c.get("/api/curriculum/week/current").json()
+    qids = [q["id"] for q in cur["questions"]]
+    c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": answers_for_ids(qids)})
     st = c.get("/api/portfolio/compliance").json()
     assert st["matchedTickers"] == []
     assert st["ok"] is False
@@ -98,7 +160,6 @@ def test_compliance_false_without_holdings(app):
     assert st["mcPassed"] is True
     assert st["canBoost"] is False
 
-    # buy non-universe stock → still not compliant
     assert c.post("/api/me/orders", json={
         "symbol": "TSLA", "side": "BUY", "type": "MARKET", "qty": 1,
     }).status_code == 200
@@ -109,7 +170,9 @@ def test_compliance_false_without_holdings(app):
 def test_boost_rejected_until_7_days_then_once(app):
     c = client(app)
     register(c, "alice")
-    c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": correct_answers()})
+    cur = c.get("/api/curriculum/week/current").json()
+    qids = [q["id"] for q in cur["questions"]]
+    c.post(f"/api/curriculum/week/{WEEK}/submit", json={"answers": answers_for_ids(qids)})
 
     buy = c.post("/api/me/orders", json={
         "symbol": "AAPL", "side": "BUY", "type": "MARKET", "qty": 10,
@@ -118,11 +181,10 @@ def test_boost_rejected_until_7_days_then_once(app):
 
     st = c.get("/api/portfolio/compliance").json()
     assert st["matchedTickers"] == ["AAPL"]
-    assert st["ok"] is False  # heldDays ~ 0
+    assert st["ok"] is False
     assert st["canBoost"] is False
     assert c.post("/api/boost/apply").status_code == 400
 
-    # time-travel: inject compliant_since 8 days ago
     eng = app.state.engine
     eng.set_curriculum_compliant_since("alice", WEEK, time.time() - 8 * 86400)
 
@@ -139,7 +201,6 @@ def test_boost_rejected_until_7_days_then_once(app):
     cash_after = next(a for a in c.get("/api/me/portfolio").json()["accounts"] if a["currency"] == "USD")["cash"]
     assert abs(cash_after - cash_before - body["amount"]) < 0.011
 
-    # second apply rejected
     assert c.post("/api/boost/apply").status_code == 400
     st3 = c.get("/api/portfolio/compliance").json()
     assert st3["boosted"] is True and st3["canBoost"] is False
