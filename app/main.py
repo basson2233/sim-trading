@@ -20,7 +20,7 @@ from .quotes import RANGES, UnknownSymbol, make_feed
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 from .universe import suggest_symbols
 from .fighter import ai_stats, compute_fighter_stats
-from .rooms import RoomStore, public_fighter
+from .rooms import STATUS_FIGHTING, RoomStore, public_fighter
 
 log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
@@ -602,8 +602,33 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
                         await websocket.send_json({"type": "pong"})
 
                     elif typ == "input":
-                        # Stub for future input sync — acknowledge only.
-                        await websocket.send_json({"type": "input_ack"})
+                        # Relay local key state to the other seat during fighting.
+                        # Ignored if not in a fighting room (no error noise).
+                        if not room_code:
+                            continue
+                        room = rooms.get(room_code)
+                        if (
+                            not room
+                            or username not in room.players
+                            or room.status != STATUS_FIGHTING
+                        ):
+                            continue
+                        peer = next((n for n in room.players if n != username), None)
+                        if peer is None:
+                            continue
+                        raw_keys = raw.get("keys")
+                        if isinstance(raw_keys, dict):
+                            keys = {str(k): bool(v) for k, v in raw_keys.items()}
+                        else:
+                            keys = {}
+                        payload = {
+                            "type": "peer_input",
+                            "from": username,
+                            "seq": raw.get("seq"),
+                            "keys": keys,
+                        }
+                        await rooms.send_json(room, peer, payload)
+                        room.touch()
 
                     else:
                         await _err(f"未知事件: {typ or '?'}")

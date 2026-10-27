@@ -384,27 +384,59 @@ class Engine:
                 self.delete_user_data(db, row["id"], username=username)
             return {"ok": True, "deleted": True, "id": row["id"], "username": username}
 
-    def rename_user(self, old_username, new_username):
-        """Rename a user and update denormalized fighter_matches rows. Returns status string."""
-        old_username = (old_username or "").strip()
-        if not old_username:
-            return "skipped: empty old username"
+    def rename_user_by_id(self, user_id, new_username):
+        """Rename by numeric id; updates users + denormalized fighter_matches.
+
+        Raises TradingError for invalid / taken names or missing user.
+        Returns {"ok": True, "id": id, "username": new, "old_username": old}.
+        """
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            raise TradingError("無效用戶 id")
         new_username = self.validate_username(new_username)
         with self.lock:
-            row = self.db.execute("SELECT id, username FROM users WHERE username = ?", (old_username,)).fetchone()
+            row = self.db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
             if not row:
-                return f"not_found: {old_username}"
-            if row["username"] == new_username:
-                return f"unchanged: {new_username}"
-            if self.db.execute("SELECT 1 FROM users WHERE username = ?", (new_username,)).fetchone():
-                return f"taken: {new_username}"
+                raise TradingError("搵唔到用戶")
             old = row["username"]
+            if old == new_username:
+                return {"ok": True, "id": row["id"], "username": new_username, "old_username": old}
+            if self.db.execute("SELECT 1 FROM users WHERE username = ?", (new_username,)).fetchone():
+                raise TradingError("呢個用戶名已經有人用")
             with self._tx() as db:
                 db.execute("UPDATE users SET username=? WHERE id=?", (new_username, row["id"]))
                 db.execute("UPDATE fighter_matches SET player_username=? WHERE player_username=?", (new_username, old))
                 db.execute("UPDATE fighter_matches SET opponent_username=? WHERE opponent_username=?", (new_username, old))
                 db.execute("UPDATE fighter_matches SET winner=? WHERE winner=?", (new_username, old))
-            return f"renamed: {old} -> {new_username} (id={row['id']})"
+            return {"ok": True, "id": row["id"], "username": new_username, "old_username": old}
+
+    def rename_user(self, old_username, new_username):
+        """Rename a user and update denormalized fighter_matches rows. Returns status string."""
+        old_username = (old_username or "").strip()
+        if not old_username:
+            return "skipped: empty old username"
+        try:
+            new_username = self.validate_username(new_username)
+        except TradingError:
+            return "skipped: invalid new username"
+        with self.lock:
+            row = self.db.execute("SELECT id, username FROM users WHERE username = ?", (old_username,)).fetchone()
+            if not row:
+                return f"not_found: {old_username}"
+            uid = row["id"]
+        try:
+            result = self.rename_user_by_id(uid, new_username)
+        except TradingError as e:
+            msg = str(e)
+            if "已經有人用" in msg:
+                return f"taken: {new_username}"
+            if "搵唔到" in msg:
+                return f"not_found: {old_username}"
+            return f"error: {msg}"
+        if result["old_username"] == result["username"]:
+            return f"unchanged: {result['username']}"
+        return f"renamed: {result['old_username']} -> {result['username']} (id={result['id']})"
 
     def migrate_google_numeric_usernames(self):
         """Privacy: Google-linked users whose public name is not u###### get a numeric handle."""

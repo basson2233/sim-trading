@@ -182,3 +182,85 @@ def test_http_public_rooms(feed):
         msg = ws.receive_json()
         assert msg["type"] == "rooms"
         assert msg["rooms"][0]["code"] == code
+
+
+def _drain_until(ws, want_type, limit=20):
+    """Receive until a message of want_type appears; return it (and last others discarded)."""
+    last = None
+    for _ in range(limit):
+        last = ws.receive_json()
+        if last.get("type") == want_type:
+            return last
+    raise AssertionError(f"expected type={want_type!r}, last={last!r}")
+
+
+def test_ws_input_relay_while_fighting(feed):
+    """During fighting, input from one seat is relayed as peer_input to the other."""
+    app = create_app(db_path=":memory:", feed=feed, pending_interval=0)
+    a, b = client(app), client(app)
+    assert register(a, "alice").status_code == 200
+    assert register(b, "bob").status_code == 200
+
+    with a.websocket_connect("/api/fighter/room/ws") as ws_a:
+        ws_a.send_json({"type": "create", "mapId": "hkex"})
+        created = ws_a.receive_json()
+        assert created["type"] == "room"
+        code = created["code"]
+
+        with b.websocket_connect("/api/fighter/room/ws") as ws_b:
+            ws_b.send_json({"type": "join", "code": code})
+            # both get room views
+            join_b = ws_b.receive_json()
+            assert join_b["type"] == "room"
+            assert join_b["guest"]["username"] == "bob"
+            join_a = ws_a.receive_json()
+            assert join_a["type"] == "room"
+
+            # input before fighting must NOT relay
+            ws_a.send_json({
+                "type": "input", "seq": 1,
+                "keys": {"left": True, "right": False, "up": False, "down": False, "light": False, "heavy": False},
+            })
+            ws_a.send_json({"type": "ping"})
+            assert ws_a.receive_json()["type"] == "pong"
+            # bob should have nothing pending from that input — ping from bob to prove channel ok
+            ws_b.send_json({"type": "ping"})
+            assert ws_b.receive_json()["type"] == "pong"
+
+            ws_a.send_json({"type": "ready"})
+            _drain_until(ws_a, "ready")
+            _drain_until(ws_b, "ready")
+
+            ws_b.send_json({"type": "ready"})
+            # both ready → ready broadcast + auto start to each
+            start_a = _drain_until(ws_a, "start")
+            start_b = _drain_until(ws_b, "start")
+            assert start_a["mode"] == "online"
+            assert start_b["mode"] == "online"
+            assert start_a["opponent"]["username"] == "bob"
+            assert start_b["opponent"]["username"] == "alice"
+
+            keys = {
+                "left": False, "right": True, "up": True,
+                "down": False, "light": True, "heavy": False,
+            }
+            ws_a.send_json({"type": "input", "seq": 7, "keys": keys})
+            peer = ws_b.receive_json()
+            assert peer == {
+                "type": "peer_input",
+                "from": "alice",
+                "seq": 7,
+                "keys": keys,
+            }
+
+            # reverse direction
+            ws_b.send_json({
+                "type": "input", "seq": 3,
+                "keys": {"left": True, "right": False, "up": False, "down": True, "light": False, "heavy": True},
+            })
+            peer2 = ws_a.receive_json()
+            assert peer2["type"] == "peer_input"
+            assert peer2["from"] == "bob"
+            assert peer2["seq"] == 3
+            assert peer2["keys"]["heavy"] is True
+            assert peer2["keys"]["down"] is True

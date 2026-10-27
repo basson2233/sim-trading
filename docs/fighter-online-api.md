@@ -81,9 +81,36 @@ Ask for joinable **public** lobbies (same filter as the HTTP list).
 
 → `{ "type": "pong" }`
 
-### `input` (stub)
+### `input` (PvP key sync)
 
-Reserved for future input sync. Server replies `{ "type": "input_ack" }` only.
+While the room status is **`fighting`**, either seat may send their local control state.
+The server relays it to the **other** seat only (not host-only). Messages are ignored
+(no error) if the sender is not in a room, or the room is not fighting.
+
+```json
+{
+  "type": "input",
+  "seq": 42,
+  "keys": {
+    "left": false,
+    "right": true,
+    "up": false,
+    "down": false,
+    "light": false,
+    "heavy": false
+  }
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|--------|
+| `type` | yes | `"input"` |
+| `seq` | no | Client monotonic counter; echoed in `peer_input` for drop/reorder detection |
+| `keys` | recommended | Object of booleans. Extra keys are passed through as-is. Missing / non-object → `{}` |
+
+Common `keys` flags (frontend lockstep-lite MVP): `left`, `right`, `up` (jump), `down` (crouch), `light`, `heavy`.
+
+There is **no** `input_ack` anymore — the peer receives `peer_input` instead.
 
 ## Server → client
 
@@ -152,6 +179,40 @@ Personalized per connection — `player` is **you**, `opponent` is the other sea
 ```
 
 Frontend should call `showArena` / `beginFight` like classmate mode (`mode: "online"`).
+
+### `peer_input`
+
+Relayed from the other seat’s `input` while status is `fighting`. Apply these keys to the remote fighter (do **not** run AI).
+
+```json
+{
+  "type": "peer_input",
+  "from": "alice",
+  "seq": 42,
+  "keys": {
+    "left": false,
+    "right": true,
+    "up": false,
+    "down": false,
+    "light": false,
+    "heavy": false
+  }
+}
+```
+
+| Field | Notes |
+|-------|--------|
+| `from` | Sender username (the opponent) |
+| `seq` | Echo of client `seq` (may be `null` if omitted) |
+| `keys` | Same object the peer sent (booleans; unknown keys preserved) |
+
+MVP is lockstep-lite: no server rollback / authority. Expect occasional desync under lag; fine for demo.
+
+### Manual PvP check
+
+1. Two browsers, same room, both ready → arena starts.
+2. Each client sends `input` every ~2–3 sim ticks with local keys.
+3. Other client receives `peer_input` and moves/attacks without AI.
 
 ### `error`
 
