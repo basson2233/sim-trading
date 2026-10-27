@@ -1,16 +1,21 @@
 "use strict";
-/* Week 1 curriculum UI — uses /api/curriculum/* when available; falls back to static files + local scoring.
+/* Curriculum / random-practice UI — uses /api/curriculum/* when available;
+   falls back to static bank (sample N) + local scoring.
    Depends on app.js globals: $, $$, esc, api, toast, state, loadSymbol, refreshAccount */
 
 const CURRICULUM = {
-  weekId: "week1-fundamentals",
+  weekId: "week1-fundamentals", // internal API id only; never shown as "Week 1"
   base: "/static/curriculum/week1",
+  bankUrl: "/static/curriculum/mc_bank_fundamentals.json",
+  lessonUrl: "/static/curriculum/lesson.md",
   lessonMd: null,
-  mc: null,          // full mc.json when static; or API public shape
-  answersKey: null,  // only from static mc.json (has answer/explain)
+  bank: null,        // full question bank when static
+  mc: null,          // active draw / API public shape
+  answersKey: null,  // only from static bank (has answer/explain)
   pane: "lesson",
-  lastSubmit: null,  // { score, passed, details, answers, at, source }
+  lastSubmit: null,
   fromApi: false,
+  displayTitle: "隨機練習",
 };
 
 function mdToHtml(md) {
@@ -71,6 +76,58 @@ function mdToHtml(md) {
   return out.join("\n");
 }
 
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+
+function shuffleCopy(arr) {
+  return shuffleInPlace(arr.slice());
+}
+
+function sampleQuestions(bankQs, n) {
+  const pool = shuffleCopy(bankQs || []);
+  const count = Math.min(Math.max(1, n || 7), pool.length || 0);
+  return pool.slice(0, count);
+}
+
+function applyDrawFromBank() {
+  const bank = CURRICULUM.bank;
+  if (!bank) return;
+  const drawN = bank.drawCount || 7;
+  const qs = sampleQuestions(bank.questions || [], drawN);
+  CURRICULUM.mc = {
+    weekId: bank.bankId || CURRICULUM.weekId,
+    title: bank.title || "基本面選股入門",
+    passScore: bank.passScore || 5,
+    total: qs.length,
+    universe: bank.universe || [],
+    compliance: bank.compliance,
+    questions: qs,
+    mode: "random",
+    userStatus: (CURRICULUM.mc && CURRICULUM.mc.userStatus) || {},
+  };
+  CURRICULUM.answersKey = Object.fromEntries(
+    qs.map((q) => [q.id, { answer: q.answer, explain: q.explain }])
+  );
+  CURRICULUM.weekId = CURRICULUM.mc.weekId || CURRICULUM.weekId;
+}
+
+function reshuffleActiveQuestions() {
+  if (CURRICULUM.bank && !CURRICULUM.fromApi) {
+    applyDrawFromBank();
+    return;
+  }
+  if (CURRICULUM.mc && Array.isArray(CURRICULUM.mc.questions)) {
+    CURRICULUM.mc.questions = shuffleCopy(CURRICULUM.mc.questions);
+  }
+}
+
 function attemptKey() {
   const user = (state && state.user) || "anon";
   return `simCurriculumAttempt:${user}:${CURRICULUM.weekId}`;
@@ -88,40 +145,78 @@ function saveLocalAttempt(data) {
 }
 
 async function loadStaticBundle() {
-  const [mdRes, mcRes] = await Promise.all([
-    fetch(`${CURRICULUM.base}/lesson.md`),
-    fetch(`${CURRICULUM.base}/mc.json`),
-  ]);
-  if (!mdRes.ok || !mcRes.ok) throw new Error("無法載入本地教材");
-  const mc = await mcRes.json();
-  CURRICULUM.lessonMd = await mdRes.text();
-  CURRICULUM.mc = mc;
-  CURRICULUM.answersKey = Object.fromEntries((mc.questions || []).map((q) => [q.id, { answer: q.answer, explain: q.explain }]));
-  CURRICULUM.weekId = mc.weekId || CURRICULUM.weekId;
+  let lessonMd = "";
+  let bank = null;
+
+  const lessonTries = [CURRICULUM.lessonUrl, `${CURRICULUM.base}/lesson.md`];
+  for (const url of lessonTries) {
+    try {
+      const mdRes = await fetch(url);
+      if (mdRes.ok) { lessonMd = await mdRes.text(); break; }
+    } catch {}
+  }
+
+  const bankTries = [
+    CURRICULUM.bankUrl,
+    "/static/curriculum/fundamentals/mc_bank.json",
+  ];
+  for (const url of bankTries) {
+    try {
+      const bankRes = await fetch(url);
+      if (bankRes.ok) { bank = await bankRes.json(); break; }
+    } catch {}
+  }
+
+  if (!bank) {
+    const mcRes = await fetch(`${CURRICULUM.base}/mc.json`);
+    if (!mcRes.ok) throw new Error("無法載入本地教材／題庫");
+    const mc = await mcRes.json();
+    bank = {
+      bankId: mc.weekId || CURRICULUM.weekId,
+      title: mc.title,
+      drawCount: mc.total || (mc.questions || []).length || 7,
+      passScore: mc.passScore || 5,
+      universe: mc.universe || [],
+      compliance: mc.compliance,
+      questions: mc.questions || [],
+    };
+  }
+
+  if (!lessonMd) throw new Error("無法載入本地教材");
+
+  CURRICULUM.lessonMd = lessonMd;
+  CURRICULUM.bank = bank;
   CURRICULUM.fromApi = false;
+  applyDrawFromBank();
 }
 
 async function fetchCurriculum() {
-  // Prefer live API (strips answers); fall back to static files for offline / pre-deploy.
+  // Prefer live API (strips answers); fall back to static bank for offline / pre-deploy.
   try {
     const data = await api("/api/curriculum/week/current");
     CURRICULUM.fromApi = true;
     CURRICULUM.weekId = data.weekId || CURRICULUM.weekId;
     CURRICULUM.lessonMd = data.lesson || "";
+    const qs = shuffleCopy(data.questions || []);
     CURRICULUM.mc = {
       weekId: data.weekId,
       title: data.title,
       passScore: data.passScore,
-      total: data.total,
+      total: data.total != null ? data.total : qs.length,
       universe: data.universe || [],
       compliance: data.compliance,
-      questions: data.questions || [],
+      questions: qs,
       userStatus: data.userStatus || {},
     };
-    CURRICULUM.answersKey = null; // answers come back only on submit
+    CURRICULUM.answersKey = null;
+    CURRICULUM.bank = null;
     if (!CURRICULUM.lessonMd) {
-      const mdRes = await fetch(`${CURRICULUM.base}/lesson.md`);
-      if (mdRes.ok) CURRICULUM.lessonMd = await mdRes.text();
+      for (const url of [CURRICULUM.lessonUrl, `${CURRICULUM.base}/lesson.md`]) {
+        try {
+          const mdRes = await fetch(url);
+          if (mdRes.ok) { CURRICULUM.lessonMd = await mdRes.text(); break; }
+        } catch {}
+      }
     }
     return;
   } catch (e) {
@@ -153,7 +248,7 @@ function showLearnPane(name) {
 }
 
 function renderLesson() {
-  $("#learnTitle").textContent = "教材 · Week 1";
+  $("#learnTitle").textContent = CURRICULUM.displayTitle;
   $("#learnWeekBadge").textContent = (CURRICULUM.mc && CURRICULUM.mc.title) || "基本面選股入門";
   $("#learnLesson").innerHTML = mdToHtml(CURRICULUM.lessonMd);
   renderUniverseChips();
@@ -174,7 +269,7 @@ function renderMcForm() {
   const mc = CURRICULUM.mc;
   const prev = currentAttemptView();
   const hasDetails = !!(prev && prev.details && prev.details.length);
-  const locked = hasDetails; // only lock UI when we have per-question feedback
+  const locked = hasDetails;
   let html = "";
 
   if (prev && prev.score != null) {
@@ -182,8 +277,10 @@ function renderMcForm() {
     html += `<div class="mc-result ${pass ? "pass" : "fail"}">
       <b>${pass ? "及格" : "未及格"}</b>　得分 ${prev.score} / ${mc.total || prev.total}（及格線 ≥${mc.passScore || 5}）
       ${prev.at ? `<div class="muted" style="margin-top:4px">提交：${esc(prev.at)}</div>` : ""}
-      <div class="muted" style="margin-top:4px">${CURRICULUM.fromApi ? "已交伺服器計分" : "本地練習模式（API 未上線）"}</div>
-      <div style="margin-top:8px"><button type="button" class="btn ghost small" id="mcRetryBtn">再次作答</button></div>
+      <div class="muted" style="margin-top:4px">${CURRICULUM.fromApi
+        ? "已交伺服器計分"
+        : `本地隨機練習（題庫抽 ${mc.total || 7} 題）`}</div>
+      <div style="margin-top:8px"><button type="button" class="btn ghost small" id="mcRetryBtn">再答一次</button></div>
     </div>`;
   }
 
@@ -209,8 +306,8 @@ function renderMcForm() {
   if (!locked) {
     html += `<button class="btn primary" type="submit">提交答卷</button>
       <p class="muted small-text" style="margin-top:8px">${CURRICULUM.fromApi
-        ? "交卷會寫入伺服器（可重交；排行榜取最佳分）。"
-        : "後端未上線時喺本機計分；成績存 localStorage。"}</p>`;
+        ? "交卷會寫入伺服器（可重交；排行榜取最佳分）。每次進入會打亂題序。"
+        : "後端未上線時喺本機計分；每次「再答一次」會重新抽題。成績存 localStorage。"}</p>`;
   }
   html += `</form>`;
   $("#learnMc").innerHTML = html;
@@ -223,8 +320,8 @@ function renderMcForm() {
   if (retry) {
     retry.onclick = () => {
       CURRICULUM.lastSubmit = null;
-      // keep localStorage until new submit; clear so form is blank
       try { localStorage.removeItem(attemptKey()); } catch {}
+      reshuffleActiveQuestions();
       renderMcForm();
       updateSideSummary();
     };
@@ -267,7 +364,6 @@ async function onMcSubmit(e) {
       return;
     }
   } else {
-    // Local grading from static mc.json
     let score = 0;
     const details = [];
     (mc.questions || []).forEach((q) => {
@@ -279,7 +375,7 @@ async function onMcSubmit(e) {
       weekId: mc.weekId,
       score,
       passed: score >= (mc.passScore || 5),
-      total: mc.total,
+      total: mc.total || (mc.questions || []).length,
       passScore: mc.passScore,
       details,
       answers,
@@ -358,13 +454,13 @@ async function renderCompliancePanel() {
       <h3 style="margin-top:0">合規檢查（P1–P3）</h3>
       ${apiMissing ? `<p class="muted small-text">後端合規 API 未回應；顯示持倉 ∩ 標的池粗略狀態。</p>` : ""}
       <div class="comp-row"><span>標的池</span><span>${esc((mc.universe || comp.universe || []).join(" · "))}</span></div>
-      <div class="comp-row"><span>P3 MC 及格（≥${mc.passScore || 5}/${mc.total || 7}）</span>
+      <div class="comp-row"><span>P3 小測及格（≥${mc.passScore || 5}/${mc.total || 7}）</span>
         <span class="${mcPass ? "comp-ok" : "comp-no"}">${mcPass ? `已及格${mcScore != null ? `（${mcScore}）` : ""}` : (mcScore != null ? `未及格（${mcScore}）` : "未提交")}</span></div>
       <div class="comp-row"><span>P1 持倉 ∩ 池</span>
         <span class="${heldOk ? "comp-ok" : "comp-no"}">${heldOk ? `有：${esc(matched)}` : "未持有池內股票"}</span></div>
       <div class="comp-row"><span>P2 已持天數</span>${daysLabel}</div>
       <div class="comp-row"><span>加成狀態</span>
-        <span class="${boosted ? "comp-ok" : "comp-wait"}">${boosted ? "本週已領取" : (canBoost ? "可以領取" : "未達標")}</span></div>
+        <span class="${boosted ? "comp-ok" : "comp-wait"}">${boosted ? "已領取" : (canBoost ? "可以領取" : "未達標")}</span></div>
       <div style="margin-top:14px">
         <button type="button" class="btn primary" id="boostBtn">使用 1% 收益加成</button>
         <p class="muted small-text" id="boostHint" style="margin-top:8px"></p>
@@ -375,7 +471,7 @@ async function renderCompliancePanel() {
   const btn = $("#boostBtn");
   if (boosted) {
     btn.disabled = true;
-    hint.textContent = "本週已經用過加成。";
+    hint.textContent = "已經用過加成。";
   } else if (canBoost) {
     btn.disabled = false;
     hint.textContent = "達標：會按總權益 1% 一次過撥入 USD 現金。";
@@ -383,7 +479,7 @@ async function renderCompliancePanel() {
   } else {
     btn.disabled = true;
     const bits = [];
-    if (!mcPass) bits.push("先完成 MC 及格");
+    if (!mcPass) bits.push("先完成小測及格");
     if (!heldOk) bits.push("買入並持有標的池內至少 1 隻");
     if (days == null && !apiMissing) bits.push("等候持倉日數累積");
     else if (days == null) bits.push("部署後端合規／加成 API");
@@ -418,10 +514,10 @@ function updateSideSummary(comp, attempt) {
   const held = ((comp && comp.matchedTickers) || []).join(", ") || "無";
   const days = comp && comp.heldDays != null ? `${Number(comp.heldDays).toFixed(1)} 日` : "—";
   el.innerHTML = `
-    <div><b>MC</b>：${mcPass ? `<span class="comp-ok">及格${score != null ? ` ${score}` : ""}</span>` : `<span class="comp-no">${score != null ? "未及格" : "未提交"}</span>`}</div>
+    <div><b>小測</b>：${mcPass ? `<span class="comp-ok">及格${score != null ? ` ${score}` : ""}</span>` : `<span class="comp-no">${score != null ? "未及格" : "未提交"}</span>`}</div>
     <div><b>池內持倉</b>：${esc(held)}</div>
     <div><b>已持天數</b>：${esc(days)}</div>
-    <div class="muted" style="margin-top:6px">加成 = MC 及格 + 池內持股滿 7 日</div>`;
+    <div class="muted" style="margin-top:6px">加成 = 小測及格 + 池內持股滿 7 日</div>`;
 }
 
 async function loadLearnTab() {
