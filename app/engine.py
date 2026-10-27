@@ -139,6 +139,31 @@ CREATE TABLE IF NOT EXISTS fighter_matches (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_fighter_matches_player ON fighter_matches(player_username, created_at);
+CREATE TABLE IF NOT EXISTS curriculum_compliance (
+    user_id INTEGER NOT NULL,
+    week_id TEXT NOT NULL,
+    compliant_since REAL,
+    PRIMARY KEY (user_id, week_id)
+);
+CREATE TABLE IF NOT EXISTS curriculum_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    week_id TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    passed INTEGER NOT NULL,
+    answers_json TEXT NOT NULL,
+    submitted_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_curriculum_attempts_user_week
+    ON curriculum_attempts(user_id, week_id, submitted_at);
+CREATE TABLE IF NOT EXISTS curriculum_boosts (
+    user_id INTEGER NOT NULL,
+    week_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    equity_at_credit REAL NOT NULL,
+    credited_at REAL NOT NULL,
+    PRIMARY KEY (user_id, week_id)
+);
 """
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{2,20}$")
@@ -321,7 +346,8 @@ class Engine:
             return {"id": cur.lastrowid, "username": username}
 
     def delete_user_data(self, db, user_id, username=None):
-        for t in ("positions", "orders", "trades", "cash", "sessions", "password_resets"):
+        for t in ("positions", "orders", "trades", "cash", "sessions", "password_resets",
+                  "curriculum_compliance", "curriculum_attempts", "curriculum_boosts"):
             db.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
         if username:
             db.execute(
@@ -474,7 +500,7 @@ class Engine:
         with self.lock:
             u = self._user(username)
             with self._tx() as db:
-                for t in ("positions", "orders", "trades"):
+                for t in ("positions", "orders", "trades", "curriculum_compliance", "curriculum_boosts"):
                     db.execute(f"DELETE FROM {t} WHERE user_id = ?", (u["id"],))
                 db.execute("DELETE FROM cash WHERE user_id = ?", (u["id"],))
                 for ccy, amt in self.initial_cash.items():
@@ -597,6 +623,7 @@ class Engine:
         db.execute("INSERT INTO trades(user_id,order_id,symbol,name,currency,side,qty,price,amount,realized_pnl,"
                    "executed_at,price_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                    (uid, order_id, sym, o["name"], ccy, o["side"], qty, price, amount, realized, now, source))
+        self._sync_curriculum_compliance(db, uid, now=now)
 
     def cancel_order(self, username, order_id):
         with self.lock:
@@ -786,3 +813,299 @@ class Engine:
             d["created_at_iso"] = _iso(d["created_at"])
             out.append(d)
         return out
+
+
+    # ------------------------------------------------------------------ curriculum / boost
+    def _sync_curriculum_compliance(self, db, user_id, week_id=None, now=None):
+        """Update durable first-match timer for the active week after a fill.
+
+        P1: holdings ∩ universe ≥ 1. If intersection becomes empty, compliant_since
+        resets to NULL. If non-empty and previously NULL, set compliant_since=now.
+        """
+        from .curriculum import CURRENT_WEEK_ID, universe_of
+
+        week_id = week_id or CURRENT_WEEK_ID
+        try:
+            universe = set(universe_of(week_id))
+        except Exception:
+            return
+        if not universe:
+            return
+        now = now if now is not None else _now()
+        matched = []
+        for p in db.execute(
+            "SELECT symbol, qty FROM positions WHERE user_id=? AND qty > 0", (user_id,)
+        ).fetchall():
+            sym = (p["symbol"] or "").upper()
+            if sym in universe:
+                matched.append(sym)
+        row = db.execute(
+            "SELECT compliant_since FROM curriculum_compliance WHERE user_id=? AND week_id=?",
+            (user_id, week_id),
+        ).fetchone()
+        if not matched:
+            if row:
+                db.execute(
+                    "UPDATE curriculum_compliance SET compliant_since=NULL WHERE user_id=? AND week_id=?",
+                    (user_id, week_id),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO curriculum_compliance(user_id, week_id, compliant_since) VALUES (?,?,NULL)",
+                    (user_id, week_id),
+                )
+            return
+        if row is None:
+            db.execute(
+                "INSERT INTO curriculum_compliance(user_id, week_id, compliant_since) VALUES (?,?,?)",
+                (user_id, week_id, now),
+            )
+        elif row["compliant_since"] is None:
+            db.execute(
+                "UPDATE curriculum_compliance SET compliant_since=? WHERE user_id=? AND week_id=?",
+                (now, user_id, week_id),
+            )
+
+    def portfolio_compliance(self, username, week_id=None, now=None):
+        """P1–P3 status for the boost gate."""
+        from .curriculum import (
+            CURRENT_WEEK_ID, HOLD_DAYS_REQUIRED, load_mc, universe_of,
+        )
+
+        week_id = week_id or CURRENT_WEEK_ID
+        now = now if now is not None else _now()
+        u = self._user(username)
+        universe = universe_of(week_id)
+        uni_set = set(universe)
+        matched = []
+        for p in self.db.execute(
+            "SELECT symbol, qty FROM positions WHERE user_id=? AND qty > 0", (u["id"],)
+        ).fetchall():
+            sym = (p["symbol"] or "").upper()
+            if sym in uni_set:
+                matched.append(sym)
+        matched = sorted(set(matched))
+
+        # Ensure row reflects current holdings (covers legacy positions bought before table existed)
+        with self.lock:
+            with self._tx() as db:
+                self._sync_curriculum_compliance(db, u["id"], week_id=week_id, now=now)
+
+        row = self.db.execute(
+            "SELECT compliant_since FROM curriculum_compliance WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone()
+        compliant_since = row["compliant_since"] if row else None
+        if not matched:
+            compliant_since = None
+        held_days = 0.0
+        if matched and compliant_since is not None:
+            held_days = max(0.0, (now - float(compliant_since)) / 86400.0)
+
+        mc = load_mc(week_id)
+        pass_score = int(mc.get("passScore") or 5)
+        best = self.db.execute(
+            "SELECT MAX(score) AS s, MAX(passed) AS p FROM curriculum_attempts "
+            "WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone()
+        mc_score = int(best["s"]) if best and best["s"] is not None else None
+        mc_passed = bool(best and best["p"])
+        n_attempts = self.db.execute(
+            "SELECT COUNT(*) FROM curriculum_attempts WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone()[0]
+        boosted = bool(self.db.execute(
+            "SELECT 1 FROM curriculum_boosts WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone())
+        ok = bool(matched) and held_days >= HOLD_DAYS_REQUIRED
+        can_boost = (
+            mc_passed
+            and ok
+            and not boosted
+        )
+        return {
+            "ok": ok,
+            "weekId": week_id,
+            "universe": universe,
+            "matchedTickers": matched,
+            "compliantSince": compliant_since,
+            "compliantSinceIso": _iso(compliant_since) if compliant_since else None,
+            "heldDays": round(held_days, 4),
+            "holdDaysRequired": HOLD_DAYS_REQUIRED,
+            "mcScore": mc_score,
+            "mcPassed": mc_passed,
+            "mcSubmitted": bool(n_attempts),
+            "passScore": pass_score,
+            "boosted": boosted,
+            "canBoost": can_boost,
+        }
+
+    def submit_curriculum_answers(self, username, week_id, answers):
+        """Grade and store one MC attempt. Returns score payload (with per-q explain after submit)."""
+        import json as _json
+        from .curriculum import CurriculumError, load_mc, score_answers
+
+        if not isinstance(answers, dict):
+            raise CurriculumError("answers 必須係物件 {qId: 'A'|...}")
+        mc = load_mc(week_id)
+        result = score_answers(mc, {str(k): str(v) for k, v in answers.items()})
+        u = self._user(username)
+        now = _now()
+        with self.lock:
+            with self._tx() as db:
+                db.execute(
+                    "INSERT INTO curriculum_attempts(user_id, week_id, score, passed, answers_json, submitted_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (u["id"], week_id, result["score"], 1 if result["passed"] else 0,
+                     _json.dumps(answers, ensure_ascii=False), now),
+                )
+        return {
+            "weekId": week_id,
+            "score": result["score"],
+            "passed": result["passed"],
+            "total": result["total"],
+            "passScore": result["passScore"],
+            "details": result["details"],
+            "submittedAt": now,
+            "submittedAtIso": _iso(now),
+        }
+
+    def curriculum_user_status(self, username, week_id):
+        u = self._user(username)
+        best = self.db.execute(
+            "SELECT MAX(score) AS s, MAX(passed) AS p FROM curriculum_attempts "
+            "WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone()
+        n = self.db.execute(
+            "SELECT COUNT(*) FROM curriculum_attempts WHERE user_id=? AND week_id=?",
+            (u["id"], week_id),
+        ).fetchone()[0]
+        return {
+            "mcScore": int(best["s"]) if best and best["s"] is not None else None,
+            "mcPassed": bool(best and best["p"]),
+            "submitted": bool(n),
+        }
+
+    def apply_curriculum_boost(self, username, week_id=None):
+        """One-shot: credit 1% of total equity (USD) to cash if P1–P3 met and not yet claimed."""
+        from .curriculum import (
+            BOOST_EQUITY_PCT, CURRENT_WEEK_ID, CurriculumError, HOLD_DAYS_REQUIRED,
+        )
+
+        week_id = week_id or CURRENT_WEEK_ID
+        status = self.portfolio_compliance(username, week_id=week_id)
+        if status["boosted"]:
+            raise CurriculumError("本週加成已經用過")
+        if not status["mcPassed"]:
+            raise CurriculumError("需要先完成本週 MC 並及格")
+        if not status["matchedTickers"]:
+            raise CurriculumError("需要持有本週合規標的池內至少一隻股票")
+        if status["heldDays"] < HOLD_DAYS_REQUIRED:
+            raise CurriculumError(
+                f"合規持股需連續滿 {HOLD_DAYS_REQUIRED} 日"
+                f"（而家 {status['heldDays']:.2f} 日）"
+            )
+        pf = self.portfolio(username)
+        equity = float((pf.get("total") or {}).get("equity") or 0.0)
+        if equity <= 0:
+            raise CurriculumError("帳戶總權益無效，無法發放加成")
+        amount = _r2(equity * BOOST_EQUITY_PCT)
+        if amount <= 0:
+            raise CurriculumError("加成金額太小")
+        u = self._user(username)
+        now = _now()
+        with self.lock:
+            with self._tx() as db:
+                exists = db.execute(
+                    "SELECT 1 FROM curriculum_boosts WHERE user_id=? AND week_id=?",
+                    (u["id"], week_id),
+                ).fetchone()
+                if exists:
+                    raise CurriculumError("本週加成已經用過")
+                cash = db.execute(
+                    "SELECT balance FROM cash WHERE user_id=? AND currency='USD'",
+                    (u["id"],),
+                ).fetchone()
+                if not cash:
+                    raise CurriculumError("搵唔到 USD 現金戶口")
+                db.execute(
+                    "UPDATE cash SET balance = ROUND(balance + ?, 2) WHERE user_id=? AND currency='USD'",
+                    (amount, u["id"]),
+                )
+                db.execute(
+                    "INSERT INTO curriculum_boosts(user_id, week_id, amount, equity_at_credit, credited_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (u["id"], week_id, amount, equity, now),
+                )
+        return {
+            "ok": True,
+            "credited": True,
+            "amount": amount,
+            "equityAtCredit": _r2(equity),
+            "weekId": week_id,
+            "creditedAt": now,
+            "creditedAtIso": _iso(now),
+            "kind": "cash_credit_pct_equity",
+            "pct": BOOST_EQUITY_PCT,
+        }
+
+    def curriculum_leaderboard(self, week_id, limit=50):
+        """Best MC score per user for the week (desc), then earliest submit of that score."""
+        rows = self.db.execute(
+            """
+            SELECT u.id AS user_id, u.username, a.score, a.passed, a.submitted_at
+            FROM curriculum_attempts a
+            JOIN users u ON u.id = a.user_id
+            WHERE a.week_id = ?
+              AND a.id = (
+                SELECT a2.id FROM curriculum_attempts a2
+                WHERE a2.user_id = a.user_id AND a2.week_id = a.week_id
+                ORDER BY a2.score DESC, a2.submitted_at ASC, a2.id ASC
+                LIMIT 1
+              )
+            ORDER BY a.score DESC, a.submitted_at ASC
+            LIMIT ?
+            """,
+            (week_id, limit),
+        ).fetchall()
+        out = []
+        for i, r in enumerate(rows, 1):
+            out.append({
+                "rank": i,
+                "userId": r["user_id"],
+                "username": r["username"],
+                "score": r["score"],
+                "passed": bool(r["passed"]),
+                "submittedAt": r["submitted_at"],
+                "submittedAtIso": _iso(r["submitted_at"]),
+            })
+        from .curriculum import WEEKLY_TOP_REWARD_USD
+        return {
+            "weekId": week_id,
+            "rows": out,
+            "topRewardUsd": WEEKLY_TOP_REWARD_USD,
+            "asOf": _iso(_now()),
+        }
+
+    def set_curriculum_compliant_since(self, username, week_id, ts):
+        """Test / admin helper: inject compliant_since for time-travel."""
+        u = self._user(username)
+        with self.lock:
+            with self._tx() as db:
+                row = db.execute(
+                    "SELECT 1 FROM curriculum_compliance WHERE user_id=? AND week_id=?",
+                    (u["id"], week_id),
+                ).fetchone()
+                if row:
+                    db.execute(
+                        "UPDATE curriculum_compliance SET compliant_since=? WHERE user_id=? AND week_id=?",
+                        (ts, u["id"], week_id),
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO curriculum_compliance(user_id, week_id, compliant_since) VALUES (?,?,?)",
+                        (u["id"], week_id, ts),
+                    )

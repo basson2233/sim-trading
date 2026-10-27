@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+COPY curriculum ./curriculum
 COPY run.sh ./run.sh
 RUN chmod +x run.sh && mkdir -p /data
 

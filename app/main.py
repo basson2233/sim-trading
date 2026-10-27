@@ -21,6 +21,14 @@ from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 from .universe import suggest_symbols
 from .fighter import ai_stats, compute_fighter_stats
 from .rooms import STATUS_FIGHTING, RoomStore, public_fighter
+from .curriculum import (
+    CURRENT_WEEK_ID,
+    CurriculumError,
+    lesson_path_rel,
+    load_lesson_markdown,
+    load_mc,
+    public_questions,
+)
 
 log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
@@ -136,7 +144,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
             raise HTTPException(status_code=429, detail=str(e))
         except AuthError as e:
             raise HTTPException(status_code=401, detail=str(e))
-        except (TradingError, SymbolError, UnknownSymbol) as e:
+        except (TradingError, SymbolError, UnknownSymbol, CurriculumError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
     def current_user(request: Request):
@@ -733,6 +741,47 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         if path.startswith("/static/fighter") or path in ("/static/fighter.js", "/static/fighter.css", "/static/fighter.html"):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
+
+
+    # ------------------------------------------------------------- curriculum / boost (Week 1+)
+    class CurriculumSubmitIn(BaseModel):
+        answers: dict
+
+    @app.get("/api/curriculum/week/current")
+    def curriculum_week_current(user=Depends(current_user)):
+        """Active week: lesson + universe + questions (answers stripped) + user MC status."""
+        def _cur():
+            mc = load_mc(CURRENT_WEEK_ID)
+            return {
+                "weekId": mc.get("weekId") or CURRENT_WEEK_ID,
+                "title": mc.get("title"),
+                "lesson": load_lesson_markdown(CURRENT_WEEK_ID),
+                "lessonPath": lesson_path_rel(CURRENT_WEEK_ID),
+                "universe": list(mc.get("universe") or []),
+                "passScore": int(mc.get("passScore") or 5),
+                "total": int(mc.get("total") or len(mc.get("questions") or [])),
+                "questions": public_questions(mc),
+                "compliance": mc.get("compliance") or {},
+                "userStatus": engine.curriculum_user_status(user["username"], CURRENT_WEEK_ID),
+            }
+        return guard(_cur)
+
+    @app.post("/api/curriculum/week/{week_id}/submit")
+    def curriculum_submit(week_id: str, body: CurriculumSubmitIn, user=Depends(current_user)):
+        return guard(engine.submit_curriculum_answers, user["username"], week_id, body.answers or {})
+
+    @app.get("/api/curriculum/week/{week_id}/leaderboard")
+    def curriculum_week_leaderboard(week_id: str, user=Depends(current_user)):
+        return guard(engine.curriculum_leaderboard, week_id)
+
+    @app.get("/api/portfolio/compliance")
+    def portfolio_compliance(user=Depends(current_user)):
+        return guard(engine.portfolio_compliance, user["username"])
+
+    @app.post("/api/boost/apply")
+    def boost_apply(user=Depends(current_user)):
+        """One-shot: credit 1% of total equity (USD cash) if MC passed + P1 + held ≥7 days."""
+        return guard(engine.apply_curriculum_boost, user["username"])
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
