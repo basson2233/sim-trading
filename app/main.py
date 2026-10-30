@@ -124,7 +124,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         if task:
             task.cancel()
 
-    app = FastAPI(title="模擬股票交易平台", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(title="模擬股票交易平台", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine = engine
     app.state.auth = auth
     app.state.google = google
@@ -138,6 +138,29 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
             if origin and urlsplit(origin).netloc != request.headers.get("host"):
                 return JSONResponse({"detail": "跨站請求被拒絕"}, status_code=403)
         return await call_next(request)
+
+    # Conservative CSP: self + inline scripts (login/forgot/reset pages), WS, Google OAuth redirect.
+    _CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self' https://accounts.google.com"
+    )
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        response.headers.setdefault("Content-Security-Policy", _CSP)
+        return response
 
     def guard(fn, *a, **kw):
         try:
@@ -692,8 +715,16 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
 
     @app.get("/admin")
     def admin_page():
-        """Admin privacy wipe UI. Operator pastes X-Admin-Key in-page; never hardcode."""
-        return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-store"})
+        """Admin privacy wipe UI. 404 when ADMIN_API_KEY unset; else serve page (key pasted in UI)."""
+        if not (os.environ.get("ADMIN_API_KEY") or "").strip():
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(
+            STATIC / "admin.html",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Robots-Tag": "noindex, nofollow",
+            },
+        )
 
     @app.get("/login")
     @app.get("/register")

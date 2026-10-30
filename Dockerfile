@@ -17,9 +17,29 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+# Full answer keys live ONLY under curriculum/ (API scoring). Never under /static.
 COPY curriculum ./curriculum
 COPY run.sh ./run.sh
-RUN chmod +x run.sh && mkdir -p /data
+RUN chmod +x run.sh && mkdir -p /data \
+ && python - <<'PY'
+# Defense in depth: strip answer/explain from any public static MC JSON.
+import json
+from pathlib import Path
+root = Path("static/curriculum")
+if root.is_dir():
+    for path in root.rglob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        changed = False
+        for q in data.get("questions") or []:
+            if "answer" in q or "explain" in q:
+                q.pop("answer", None)
+                q.pop("explain", None)
+                changed = True
+        if changed:
+            data["publicOnly"] = True
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"stripped answers from {path}")
+PY
 
 # SQLite + password-reset log live on the host/volume at APP_DATA_DIR.
 # Do not use Docker VOLUME here — Railway rejects it; mount a Railway volume at /data instead.
