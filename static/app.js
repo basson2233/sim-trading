@@ -194,21 +194,63 @@ function updateEstimate() {
   b.textContent = `確認${SIDE[state.side]}`; b.className = "btn big " + (state.side === "BUY" ? "primary" : "sellmode");
 }
 let pendingOrderBody = null;
+let reasonEditTarget = null; // { kind: "order"|"trade", id }
+
+function reasonCellHtml(kind, id, reason) {
+  const text = reason ? esc(reason) : "—";
+  return `<td class="reason-cell"><span class="reason-text">${text}</span> ` +
+    `<button type="button" class="btn ghost small" data-edit-reason="${kind}" data-edit-id="${id}" ` +
+    `data-edit-current="${esc(reason || "")}">改</button></td>`;
+}
+
+function applyReasonModalChrome(mode) {
+  const title = $("#reasonTitle");
+  const hint = $("#reasonHint");
+  const help = $("#reasonHelp");
+  const skip = $("#reasonSkip");
+  const confirm = $("#reasonConfirm");
+  if (mode === "edit") {
+    if (title) title.textContent = "編輯交易理由";
+    if (hint) hint.textContent = "可以補寫、修改或清空呢筆交易理由（最多 500 字）。留空再儲存即清空。";
+    if (help) help.textContent = "可留空清空；最多 500 字。";
+    if (skip) skip.classList.add("hidden");
+    if (confirm) confirm.textContent = "儲存";
+  } else {
+    if (title) title.textContent = "交易理由（可選）";
+    if (hint) hint.textContent = "落單前可以寫低點解今次買／賣（可選／可跳過）。方便之後回顧同教材反思。";
+    if (help) help.textContent = "可留空或跳過；填咗會一齊送出（最多 500 字）。取消就唔會落單";
+    if (skip) skip.classList.remove("hidden");
+    if (confirm) confirm.textContent = "確認落單";
+  }
+}
 
 function openReasonModal(show) {
   const m = $("#reasonModal");
   if (!m) return;
   m.classList.toggle("hidden", !show);
   if (show) {
-    const f = $("#reasonForm");
-    if (f) f.reset();
+    const isEdit = !!reasonEditTarget;
+    applyReasonModalChrome(isEdit ? "edit" : "place");
     const msg = $("#reasonMsg");
     if (msg) { msg.className = "msg"; msg.textContent = ""; }
     const ta = $("#reasonText");
-    if (ta) { ta.value = ""; setTimeout(() => ta.focus(), 0); }
+    if (ta) {
+      if (!isEdit) ta.value = "";
+      setTimeout(() => ta.focus(), 0);
+    }
   } else {
     pendingOrderBody = null;
+    reasonEditTarget = null;
+    applyReasonModalChrome("place");
   }
+}
+
+function openEditReasonModal(kind, id, current) {
+  pendingOrderBody = null;
+  reasonEditTarget = { kind, id };
+  const ta = $("#reasonText");
+  if (ta) ta.value = current || "";
+  openReasonModal(true);
 }
 
 function submitOrder(ev) {
@@ -223,24 +265,22 @@ function submitOrder(ev) {
   }
   const body = {symbol: q.symbol, side: state.side, type: state.type, qty};
   if (state.type === "LIMIT") body.limit_price = Number($("#oLimit").value);
+  reasonEditTarget = null;
   pendingOrderBody = body;
+  const ta = $("#reasonText");
+  if (ta) ta.value = "";
   openReasonModal(true);
 }
 
 async function confirmReasonOrder(ev) {
   if (ev) ev.preventDefault();
-  const body = pendingOrderBody;
   const msg = $("#reasonMsg");
-  const orderMsg = $("#orderMsg");
-  if (!body) { openReasonModal(false); return; }
   const reason = ($("#reasonText").value || "").trim();
   if (reason.length > 500) {
     msg.className = "msg err";
     msg.textContent = "❌ 理由太長（最多 500 字）";
     return;
   }
-  const payload = {...body};
-  if (reason) payload.reason = reason;
   const confirmBtn = $("#reasonConfirm");
   const skipBtn = $("#reasonSkip");
   const submitBtn = $("#submitBtn");
@@ -248,6 +288,22 @@ async function confirmReasonOrder(ev) {
   if (skipBtn) skipBtn.disabled = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
+    if (reasonEditTarget) {
+      const { kind, id } = reasonEditTarget;
+      const path = kind === "trade"
+        ? `${U()}/trades/${id}/reason`
+        : `${U()}/orders/${id}/reason`;
+      await api(path, { method: "PATCH", body: { reason } });
+      openReasonModal(false);
+      toast("交易理由已更新");
+      refreshAccount();
+      return;
+    }
+    const body = pendingOrderBody;
+    const orderMsg = $("#orderMsg");
+    if (!body) { openReasonModal(false); return; }
+    const payload = {...body};
+    if (reason) payload.reason = reason;
     const o = await api(`${U()}/orders`, {method: "POST", body: payload});
     openReasonModal(false);
     orderMsg.className = "msg ok";
@@ -298,7 +354,7 @@ function renderOpen(list) {
   const rows = list.map((o) => `<tr><td class="l">#${o.id}</td><td class="l">${tHK(o.created_at_iso)}</td>
     <td class="l"><span class="sym" data-sym="${esc(o.symbol)}">${esc(o.symbol)}</span></td><td><span class="pill ${o.side}">${SIDE[o.side]}</span></td>
     <td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td><td>${fmtPx(o.limit_price)}</td>
-    <td class="reason-cell">${o.reason ? esc(o.reason) : "—"}</td>
+    ${reasonCellHtml("order", o.id, o.reason)}
     <td><button class="btn ghost small" data-cancel="${o.id}">取消</button></td></tr>`).join("");
   $("#openTable").innerHTML = `<tr><th class="l">單號</th><th class="l">時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th class="l">理由</th><th></th></tr>` +
     (rows || `<tr><td colspan="9" class="empty">冇未成交訂單</td></tr>`);
@@ -313,7 +369,7 @@ async function renderHistory() {
       <td>${t.currency} ${fmt(t.amount)}</td>
       <td class="${cls(t.realized_pnl)}">${t.realized_pnl == null ? "-" : sign(t.realized_pnl) + fmt(t.realized_pnl)}</td>
       <td>${t.price_source === "yahoo" ? "Yahoo" : "模擬"}</td>
-      <td class="reason-cell">${t.reason ? esc(t.reason) : "—"}</td></tr>`).join("");
+      ${reasonCellHtml("trade", t.id, t.reason)}</tr>`).join("");
     $("#histTable").innerHTML = `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th><th>價格來源</th><th class="l">理由</th></tr>` +
       (rows || `<tr><td colspan="10" class="empty">暫時未有成交</td></tr>`);
   } else {
@@ -323,7 +379,7 @@ async function renderHistory() {
       <td><span class="pill ${o.side}">${SIDE[o.side]}</span></td><td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td>
       <td>${o.limit_price == null ? "-" : fmtPx(o.limit_price)}</td><td>${o.fill_price == null ? "-" : fmtPx(o.fill_price)}</td>
       <td><span class="pill ${o.status}">${STATUS[o.status]}</span></td>
-      <td class="reason-cell">${o.reason ? esc(o.reason) : "—"}</td>
+      ${reasonCellHtml("order", o.id, o.reason)}
       <td class="l">${tHK(o.updated_at_iso)}</td></tr>`).join("");
     $("#histTable").innerHTML = `<tr><th class="l">單號</th><th class="l">落單時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th>成交價</th><th>狀態</th><th class="l">理由</th><th class="l">更新時間</th></tr>` +
       (rows || `<tr><td colspan="11" class="empty">暫時未有訂單</td></tr>`);
@@ -532,6 +588,14 @@ function init() {
       try { await api(`${U()}/orders/${t.dataset.cancel}/cancel`, {method: "POST"}); toast("已取消訂單"); refreshAccount(); }
       catch (err) { toast(err.message); }
     }
+    const editBtn = t.closest("[data-edit-reason]");
+    if (editBtn) {
+      openEditReasonModal(
+        editBtn.getAttribute("data-edit-reason"),
+        Number(editBtn.getAttribute("data-edit-id")),
+        editBtn.getAttribute("data-edit-current") || ""
+      );
+    }
   });
   seg("#sideSeg", "side", updateEstimate);
   seg("#typeSeg", "type", () => { $("#limitRow").classList.toggle("hidden", state.type !== "LIMIT");
@@ -543,6 +607,7 @@ function init() {
   $("#orderForm").addEventListener("submit", submitOrder);
   if ($("#reasonCancel")) $("#reasonCancel").onclick = () => openReasonModal(false);
   if ($("#reasonSkip")) $("#reasonSkip").onclick = () => {
+    if (reasonEditTarget) return;
     const ta = $("#reasonText");
     if (ta) ta.value = "";
     confirmReasonOrder();

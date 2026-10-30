@@ -130,4 +130,4 @@ button.user-link:hover{color:#93c5fd}
 
 textarea{background:#0b0f14;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:14px;width:100%;font-family:inherit;resize:vertical;min-height:88px;line-height:1.5}
 textarea:focus{outline:none;border-color:var(--accent)}
-.reason-cell{max-width:220px;white-space:normal;word-break:break-word;text-align:left;color:var(--muted);font-size:12px}
+.reason-cell{max-width:260px;white-space:normal;word-break:break-word;text-align:left;color:var(--muted);font-size:12px}.reason-cell .reason-text{margin-right:6px}.reason-cell .btn.small{padding:2px 8px;font-size:11px;vertical-align:middle}
