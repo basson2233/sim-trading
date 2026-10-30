@@ -234,23 +234,21 @@ async function confirmReasonOrder(ev) {
   const orderMsg = $("#orderMsg");
   if (!body) { openReasonModal(false); return; }
   const reason = ($("#reasonText").value || "").trim();
-  if (reason.length < 5) {
-    msg.className = "msg err";
-    msg.textContent = "❌ 請輸入交易理由（最少 5 個字）";
-    $("#reasonText").focus();
-    return;
-  }
   if (reason.length > 500) {
     msg.className = "msg err";
     msg.textContent = "❌ 理由太長（最多 500 字）";
     return;
   }
+  const payload = {...body};
+  if (reason) payload.reason = reason;
   const confirmBtn = $("#reasonConfirm");
+  const skipBtn = $("#reasonSkip");
   const submitBtn = $("#submitBtn");
   if (confirmBtn) confirmBtn.disabled = true;
+  if (skipBtn) skipBtn.disabled = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
-    const o = await api(`${U()}/orders`, {method: "POST", body: {...body, reason}});
+    const o = await api(`${U()}/orders`, {method: "POST", body: payload});
     openReasonModal(false);
     orderMsg.className = "msg ok";
     orderMsg.textContent = o.status === "FILLED"
@@ -262,6 +260,7 @@ async function confirmReasonOrder(ev) {
     msg.textContent = "❌ " + e.message;
   } finally {
     if (confirmBtn) confirmBtn.disabled = false;
+    if (skipBtn) skipBtn.disabled = false;
     if (submitBtn) submitBtn.disabled = false;
   }
 }
@@ -543,6 +542,11 @@ function init() {
   $("#qtyMinus").onclick = () => { $("#oQty").value = Math.max(lot(), (Number($("#oQty").value) || 0) - lot()); updateEstimate(); };
   $("#orderForm").addEventListener("submit", submitOrder);
   if ($("#reasonCancel")) $("#reasonCancel").onclick = () => openReasonModal(false);
+  if ($("#reasonSkip")) $("#reasonSkip").onclick = () => {
+    const ta = $("#reasonText");
+    if (ta) ta.value = "";
+    confirmReasonOrder();
+  };
   if ($("#reasonForm")) $("#reasonForm").addEventListener("submit", confirmReasonOrder);
   const reasonModal = $("#reasonModal");
   if (reasonModal) reasonModal.addEventListener("click", (e) => { if (e.target === reasonModal) openReasonModal(false); });

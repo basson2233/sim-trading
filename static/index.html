@@ -198,16 +198,17 @@
 
 <div id="reasonModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reasonTitle">
   <div class="modal-box">
-    <h2 id="reasonTitle">交易理由</h2>
-    <p class="muted">落單前請寫低點解今次買／賣（最少 5 個字）。方便之後回顧同教材反思。</p>
+    <h2 id="reasonTitle">交易理由（可選）</h2>
+    <p class="muted">落單前可以寫低點解今次買／賣（可選／可跳過）。方便之後回顧同教材反思。</p>
     <form id="reasonForm" class="order-form">
-      <label>理由
-        <textarea id="reasonText" rows="4" maxlength="500" required placeholder="例如：跟住教材池買 AAPL，做長線持倉練習"></textarea>
-        <small class="muted">5–500 字；取消就唔會落單</small>
+      <label>理由（可選）
+        <textarea id="reasonText" rows="4" maxlength="500" placeholder="例如：跟住教材池買 AAPL，做長線持倉練習"></textarea>
+        <small class="muted">可留空或跳過；填咗會一齊送出（最多 500 字）。取消就唔會落單</small>
       </label>
       <div class="msg" id="reasonMsg"></div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn ghost" id="reasonCancel" style="flex:1">取消</button>
+        <button type="button" class="btn ghost" id="reasonSkip" style="flex:1">跳過，直接落單</button>
         <button class="btn primary" id="reasonConfirm" style="flex:1">確認落單</button>
       </div>
     </form>
@@ -215,7 +216,7 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=20261030r"></script>
+<script src="/static/app.js?v=20261030s"></script>
 <script src="/static/curriculum.js?v=20261027d"></script>
 </body>
 </html>
