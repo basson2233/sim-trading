@@ -222,6 +222,10 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         type: str = "MARKET"
         qty: float
         limit_price: Optional[float] = None
+        reason: Optional[str] = None  # optional; blank/omit → null; max 500 after trim
+
+    class ReasonIn(BaseModel):
+        reason: Optional[str] = None  # omit/blank clears; max 500 after trim
 
     # ------------------------------------------------------------- auth API
     @app.post("/api/auth/register")
@@ -381,11 +385,21 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     @app.post("/api/me/orders")
     def place(body: OrderIn, user=Depends(current_user)):
         return guard(engine.place_order, user["username"], body.symbol, body.side, body.type, body.qty,
-                     body.limit_price)
+                     body.limit_price, reason=body.reason)
 
     @app.post("/api/me/orders/{order_id}/cancel")
     def cancel(order_id: int, user=Depends(current_user)):
         return guard(engine.cancel_order, user["username"], order_id)
+
+    @app.patch("/api/me/orders/{order_id}/reason")
+    def patch_order_reason(order_id: int, body: ReasonIn, user=Depends(current_user)):
+        """Add or edit trade rationale after place; empty clears. Own orders only."""
+        return guard(engine.set_order_reason, user["username"], order_id, body.reason)
+
+    @app.patch("/api/me/trades/{trade_id}/reason")
+    def patch_trade_reason(trade_id: int, body: ReasonIn, user=Depends(current_user)):
+        """Add or edit rationale on a fill; mirrors onto parent order. Own trades only."""
+        return guard(engine.set_trade_reason, user["username"], trade_id, body.reason)
 
     @app.post("/api/me/reset")
     def reset(user=Depends(current_user)):

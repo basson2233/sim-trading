@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS orders (
     fill_price REAL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    price_source TEXT
+    price_source TEXT,
+    reason TEXT
 );
 CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,7 +123,8 @@ CREATE TABLE IF NOT EXISTS trades (
     amount REAL NOT NULL,
     realized_pnl REAL,
     executed_at REAL NOT NULL,
-    price_source TEXT
+    price_source TEXT,
+    reason TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_orders_user ON orders(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_trades_user ON trades(user_id);
@@ -215,6 +217,7 @@ class Engine:
         self.db.execute("PRAGMA journal_mode=WAL")
         self._migrate_pre_schema()
         self.db.executescript(SCHEMA)
+        self._migrate_trade_reason()
         self._migrate_usd_only_capital()
 
     def _migrate_pre_schema(self):
@@ -233,6 +236,14 @@ class Engine:
         for col, ddl in adds:
             if col not in cols:
                 self.db.execute(ddl)
+
+
+    def _migrate_trade_reason(self):
+        """Add orders.reason / trades.reason on DBs created before optional trade rationale."""
+        for table in ("orders", "trades"):
+            cols = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if cols and "reason" not in cols:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN reason TEXT")
 
     def _migrate_usd_only_capital(self):
         """One-shot: drop HKD wallets, set everyone to USD 1M starting capital, clear trades."""
@@ -509,7 +520,20 @@ class Engine:
                 db.execute("UPDATE users SET reset_at = ? WHERE id = ?", (_now(), u["id"]))
 
     # ------------------------------------------------------------------ orders
-    def place_order(self, username, symbol, side, order_type, qty, limit_price=None):
+    @staticmethod
+    def _normalize_reason(reason):
+        """Optional trade rationale: omit/blank → None; else trim; max 500 chars."""
+        if reason is None:
+            return None
+        s = str(reason).strip()
+        if not s:
+            return None
+        if len(s) > 500:
+            raise TradingError("交易理由唔可以超過 500 字")
+        return s
+
+    def place_order(self, username, symbol, side, order_type, qty, limit_price=None, reason=None):
+        reason = self._normalize_reason(reason)
         side = (side or "").upper()
         order_type = (order_type or "").upper()
         if side not in ("BUY", "SELL"):
@@ -566,8 +590,9 @@ class Engine:
                 now = _now()
                 cur = db.execute(
                     "INSERT INTO orders(user_id,symbol,name,currency,side,type,qty,limit_price,status,"
-                    "created_at,updated_at,price_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (u["id"], symbol, q.name, ccy, side, order_type, qty, limit_price, "PENDING", now, now, q.source))
+                    "created_at,updated_at,price_source,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (u["id"], symbol, q.name, ccy, side, order_type, qty, limit_price, "PENDING", now, now, q.source,
+                     reason))
                 oid = cur.lastrowid
                 if marketable:
                     self._fill(db, oid, q.price, q.source)
@@ -620,9 +645,11 @@ class Engine:
         now = _now()
         db.execute("UPDATE orders SET status='FILLED', fill_price=?, reserved_amount=0, updated_at=?, price_source=? "
                    "WHERE id=?", (price, now, source, order_id))
+        trade_reason = o["reason"] if "reason" in o.keys() else None
         db.execute("INSERT INTO trades(user_id,order_id,symbol,name,currency,side,qty,price,amount,realized_pnl,"
-                   "executed_at,price_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (uid, order_id, sym, o["name"], ccy, o["side"], qty, price, amount, realized, now, source))
+                   "executed_at,price_source,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (uid, order_id, sym, o["name"], ccy, o["side"], qty, price, amount, realized, now, source,
+                    trade_reason))
         self._sync_curriculum_compliance(db, uid, now=now)
 
     def cancel_order(self, username, order_id):
@@ -643,6 +670,39 @@ class Engine:
                 db.execute("UPDATE orders SET status='CANCELLED', reserved_amount=0, updated_at=? WHERE id=?",
                            (_now(), order_id))
             return self.get_order(order_id)
+
+    def set_order_reason(self, username, order_id, reason=None):
+        """Update reason on own order; sync to linked trades. Empty clears."""
+        reason = self._normalize_reason(reason)
+        with self.lock:
+            u = self._user(username)
+            with self._tx() as db:
+                o = db.execute("SELECT id FROM orders WHERE id=? AND user_id=?", (order_id, u["id"])).fetchone()
+                if not o:
+                    raise TradingError("搵唔到呢張訂單")
+                db.execute("UPDATE orders SET reason=?, updated_at=? WHERE id=?", (reason, _now(), order_id))
+                db.execute("UPDATE trades SET reason=? WHERE order_id=? AND user_id=?", (reason, order_id, u["id"]))
+            return self.get_order(order_id)
+
+    def set_trade_reason(self, username, trade_id, reason=None):
+        """Update reason on own fill; also mirrors onto parent order."""
+        reason = self._normalize_reason(reason)
+        with self.lock:
+            u = self._user(username)
+            with self._tx() as db:
+                t = db.execute("SELECT id, order_id FROM trades WHERE id=? AND user_id=?",
+                               (trade_id, u["id"])).fetchone()
+                if not t:
+                    raise TradingError("搵唔到呢筆成交")
+                db.execute("UPDATE trades SET reason=? WHERE id=?", (reason, trade_id))
+                db.execute("UPDATE orders SET reason=?, updated_at=? WHERE id=? AND user_id=?",
+                           (reason, _now(), t["order_id"], u["id"]))
+            r = self.db.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+            d = dict(r)
+            d.pop("user_id", None)
+            d["reason"] = d.get("reason")
+            d["executed_at_iso"] = _iso(d["executed_at"])
+            return d
 
     def process_pending(self):
         """Fill resting limit orders whose limit has been reached. Returns list of filled order ids."""
@@ -679,6 +739,7 @@ class Engine:
     def _order_dict(r):
         d = dict(r)
         d.pop("user_id", None)
+        d["reason"] = d.get("reason")
         d["created_at_iso"] = _iso(d["created_at"])
         d["updated_at_iso"] = _iso(d["updated_at"])
         return d
@@ -699,6 +760,7 @@ class Engine:
         for r in self.db.execute("SELECT * FROM trades WHERE user_id=? ORDER BY id DESC LIMIT ?", (u["id"], limit)):
             d = dict(r)
             d.pop("user_id")
+            d["reason"] = d.get("reason")
             d["executed_at_iso"] = _iso(d["executed_at"])
             out.append(d)
         return out
