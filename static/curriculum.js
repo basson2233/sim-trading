@@ -1,6 +1,7 @@
 "use strict";
-/* Curriculum / random-practice UI — uses /api/curriculum/* when available;
-   falls back to static bank (sample N) + local scoring.
+/* Curriculum / random-practice UI — prefers /api/curriculum/* (no answers in GET).
+   Static bank under /static/curriculum is public stem+options only (no answer keys).
+   Scoring always goes through POST /api/curriculum/.../submit — never client-side.
    Depends on app.js globals: $, $$, esc, api, toast, state, loadSymbol, refreshAccount */
 
 const CURRICULUM = {
@@ -9,9 +10,8 @@ const CURRICULUM = {
   bankUrl: "/static/curriculum/mc_bank_fundamentals.json",
   lessonUrl: "/static/curriculum/lesson.md",
   lessonMd: null,
-  bank: null,        // full question bank when static
+  bank: null,        // public bank (stem+options) when API unavailable
   mc: null,          // active draw / API public shape
-  answersKey: null,  // only from static bank (has answer/explain)
   pane: "lesson",
   lastSubmit: null,
   fromApi: false,
@@ -96,11 +96,19 @@ function sampleQuestions(bankQs, n) {
   return pool.slice(0, count);
 }
 
+function publicOnlyQuestions(questions) {
+  return (questions || []).map((q) => ({
+    id: q.id,
+    stem: q.stem,
+    choices: (q.choices || []).map((c) => ({ key: c.key, text: c.text })),
+  }));
+}
+
 function applyDrawFromBank() {
   const bank = CURRICULUM.bank;
   if (!bank) return;
   const drawN = bank.drawCount || 7;
-  const qs = sampleQuestions(bank.questions || [], drawN);
+  const qs = sampleQuestions(publicOnlyQuestions(bank.questions || []), drawN);
   CURRICULUM.mc = {
     weekId: CURRICULUM.weekId, // keep internal compliance key
     title: bank.title || "基本面選股入門",
@@ -114,9 +122,6 @@ function applyDrawFromBank() {
     mode: "random",
     userStatus: (CURRICULUM.mc && CURRICULUM.mc.userStatus) || {},
   };
-  CURRICULUM.answersKey = Object.fromEntries(
-    (bank.questions || []).map((q) => [q.id, { answer: q.answer, explain: q.explain }])
-  );
 }
 
 function reshuffleActiveQuestions() {
@@ -157,6 +162,7 @@ async function loadStaticBundle() {
     } catch {}
   }
 
+  // Public static banks must not carry answer keys; strip defensively if a stale deploy does.
   const bankTries = [
     CURRICULUM.bankUrl,
     "/static/curriculum/fundamentals/mc_bank.json",
@@ -185,6 +191,7 @@ async function loadStaticBundle() {
 
   if (!lessonMd) throw new Error("無法載入本地教材");
 
+  bank.questions = publicOnlyQuestions(bank.questions || []);
   CURRICULUM.lessonMd = lessonMd;
   CURRICULUM.bank = bank;
   CURRICULUM.fromApi = false;
@@ -211,7 +218,6 @@ async function fetchCurriculum() {
       questions: qs,
       userStatus: data.userStatus || {},
     };
-    CURRICULUM.answersKey = null;
     CURRICULUM.bank = null;
     if (!CURRICULUM.lessonMd) {
       for (const url of [CURRICULUM.lessonUrl, `${CURRICULUM.base}/lesson.md`]) {
@@ -289,7 +295,7 @@ function renderMcForm() {
       ${prev.at ? `<div class="muted" style="margin-top:4px">提交：${esc(prev.at)}</div>` : ""}
       <div class="muted" style="margin-top:4px">${CURRICULUM.fromApi
         ? "已交伺服器計分"
-        : `本地隨機練習（抽 ${drawN}${bankN ? "／" + bankN : ""}）`}</div>
+        : `題目來自公開題庫（抽 ${drawN}${bankN ? "／" + bankN : ""}）；計分需登入後端`}</div>
       <div style="margin-top:8px"><button type="button" class="btn ghost small" id="mcRetryBtn">再答一次</button></div>
     </div>`;
   }
@@ -317,7 +323,7 @@ function renderMcForm() {
     html += `<button class="btn primary" type="submit">提交答卷</button>
       <p class="muted small-text" style="margin-top:8px">${CURRICULUM.fromApi
         ? "交卷會寫入伺服器（可重交；排行榜取最佳分）。每次進入會打亂題序。"
-        : "後端未上線時喺本機計分；每次「再答一次」會重新抽題。成績存 localStorage。"}</p>`;
+        : "公開題庫只有題幹／選項；交卷必須登入，由伺服器對答案。每次「再答一次」會重新抽題。"}</p>`;
   }
   html += `</form>`;
   $("#learnMc").innerHTML = html;
@@ -362,47 +368,28 @@ async function onMcSubmit(e) {
   });
   if (missing) { toast(`仲有 ${missing} 題未答`); return; }
 
+  // Always grade on the server — public/static payloads never include answer keys.
   let payload;
-  if (CURRICULUM.fromApi) {
-    try {
-      const res = await api(`/api/curriculum/week/${encodeURIComponent(CURRICULUM.weekId)}/submit`, {
-        method: "POST",
-        body: { answers },
-      });
-      payload = {
-        weekId: res.weekId || CURRICULUM.weekId,
-        score: res.score,
-        passed: res.passed,
-        total: res.total,
-        passScore: res.passScore,
-        details: res.details || [],
-        answers,
-        at: res.submittedAtIso || new Date().toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }),
-        source: "api",
-      };
-    } catch (err) {
-      toast(err.message);
-      return;
-    }
-  } else {
-    let score = 0;
-    const details = [];
-    (mc.questions || []).forEach((q) => {
-      const ok = answers[q.id] === q.answer;
-      if (ok) score++;
-      details.push({ id: q.id, correct: ok, answer: q.answer, explain: q.explain });
+  try {
+    const res = await api(`/api/curriculum/week/${encodeURIComponent(CURRICULUM.weekId)}/submit`, {
+      method: "POST",
+      body: { answers },
     });
     payload = {
-      weekId: mc.weekId,
-      score,
-      passed: score >= (mc.passScore || 5),
-      total: mc.total || (mc.questions || []).length,
-      passScore: mc.passScore,
-      details,
+      weekId: res.weekId || CURRICULUM.weekId,
+      score: res.score,
+      passed: res.passed,
+      total: res.total,
+      passScore: res.passScore,
+      details: res.details || [],
       answers,
-      at: new Date().toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }),
-      source: "local",
+      at: res.submittedAtIso || new Date().toLocaleString("zh-HK", { timeZone: "Asia/Hong_Kong" }),
+      source: "api",
     };
+    CURRICULUM.fromApi = true;
+  } catch (err) {
+    toast(err.message || "需要登入後由伺服器計分（題庫答案不再放喺前端）");
+    return;
   }
 
   CURRICULUM.lastSubmit = payload;
