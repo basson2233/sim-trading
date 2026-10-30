@@ -193,21 +193,77 @@ function updateEstimate() {
   const b = $("#submitBtn");
   b.textContent = `確認${SIDE[state.side]}`; b.className = "btn big " + (state.side === "BUY" ? "primary" : "sellmode");
 }
-async function submitOrder(ev) {
+let pendingOrderBody = null;
+
+function openReasonModal(show) {
+  const m = $("#reasonModal");
+  if (!m) return;
+  m.classList.toggle("hidden", !show);
+  if (show) {
+    const f = $("#reasonForm");
+    if (f) f.reset();
+    const msg = $("#reasonMsg");
+    if (msg) { msg.className = "msg"; msg.textContent = ""; }
+    const ta = $("#reasonText");
+    if (ta) { ta.value = ""; setTimeout(() => ta.focus(), 0); }
+  } else {
+    pendingOrderBody = null;
+  }
+}
+
+function submitOrder(ev) {
   ev.preventDefault();
   const q = state.quote; if (!q) return;
-  const body = {symbol: q.symbol, side: state.side, type: state.type, qty: Number($("#oQty").value)};
+  const qty = Number($("#oQty").value);
+  if (!qty || qty <= 0) {
+    const msg = $("#orderMsg");
+    msg.className = "msg err";
+    msg.textContent = "❌ 請輸入有效數量";
+    return;
+  }
+  const body = {symbol: q.symbol, side: state.side, type: state.type, qty};
   if (state.type === "LIMIT") body.limit_price = Number($("#oLimit").value);
-  const msg = $("#orderMsg"); $("#submitBtn").disabled = true;
+  pendingOrderBody = body;
+  openReasonModal(true);
+}
+
+async function confirmReasonOrder(ev) {
+  if (ev) ev.preventDefault();
+  const body = pendingOrderBody;
+  const msg = $("#reasonMsg");
+  const orderMsg = $("#orderMsg");
+  if (!body) { openReasonModal(false); return; }
+  const reason = ($("#reasonText").value || "").trim();
+  if (reason.length < 5) {
+    msg.className = "msg err";
+    msg.textContent = "❌ 請輸入交易理由（最少 5 個字）";
+    $("#reasonText").focus();
+    return;
+  }
+  if (reason.length > 500) {
+    msg.className = "msg err";
+    msg.textContent = "❌ 理由太長（最多 500 字）";
+    return;
+  }
+  const confirmBtn = $("#reasonConfirm");
+  const submitBtn = $("#submitBtn");
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (submitBtn) submitBtn.disabled = true;
   try {
-    const o = await api(`${U()}/orders`, {method: "POST", body});
-    msg.className = "msg ok";
-    msg.textContent = o.status === "FILLED"
+    const o = await api(`${U()}/orders`, {method: "POST", body: {...body, reason}});
+    openReasonModal(false);
+    orderMsg.className = "msg ok";
+    orderMsg.textContent = o.status === "FILLED"
       ? `✅ 已成交：${SIDE[o.side]} ${o.symbol} ${fmt(o.qty, 0)} 股 @ ${fmtPx(o.fill_price)}`
       : `⏳ 限價單已提交，等待成交（${SIDE[o.side]} ${fmt(o.qty, 0)} 股 @ ${fmtPx(o.limit_price)}）`;
     refreshAccount();
-  } catch (e) { msg.className = "msg err"; msg.textContent = "❌ " + e.message; }
-  finally { $("#submitBtn").disabled = false; }
+  } catch (e) {
+    msg.className = "msg err";
+    msg.textContent = "❌ " + e.message;
+  } finally {
+    if (confirmBtn) confirmBtn.disabled = false;
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------- account
@@ -243,9 +299,10 @@ function renderOpen(list) {
   const rows = list.map((o) => `<tr><td class="l">#${o.id}</td><td class="l">${tHK(o.created_at_iso)}</td>
     <td class="l"><span class="sym" data-sym="${esc(o.symbol)}">${esc(o.symbol)}</span></td><td><span class="pill ${o.side}">${SIDE[o.side]}</span></td>
     <td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td><td>${fmtPx(o.limit_price)}</td>
+    <td class="reason-cell">${o.reason ? esc(o.reason) : "—"}</td>
     <td><button class="btn ghost small" data-cancel="${o.id}">取消</button></td></tr>`).join("");
-  $("#openTable").innerHTML = `<tr><th class="l">單號</th><th class="l">時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th></th></tr>` +
-    (rows || `<tr><td colspan="8" class="empty">冇未成交訂單</td></tr>`);
+  $("#openTable").innerHTML = `<tr><th class="l">單號</th><th class="l">時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th class="l">理由</th><th></th></tr>` +
+    (rows || `<tr><td colspan="9" class="empty">冇未成交訂單</td></tr>`);
 }
 async function renderHistory() {
   if (!state.user) return;
@@ -256,18 +313,21 @@ async function renderHistory() {
       <td><span class="pill ${t.side}">${SIDE[t.side]}</span></td><td>${fmt(t.qty, 0)}</td><td>${fmtPx(t.price)}</td>
       <td>${t.currency} ${fmt(t.amount)}</td>
       <td class="${cls(t.realized_pnl)}">${t.realized_pnl == null ? "-" : sign(t.realized_pnl) + fmt(t.realized_pnl)}</td>
-      <td>${t.price_source === "yahoo" ? "Yahoo" : "模擬"}</td></tr>`).join("");
-    $("#histTable").innerHTML = `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th><th>價格來源</th></tr>` +
-      (rows || `<tr><td colspan="9" class="empty">暫時未有成交</td></tr>`);
+      <td>${t.price_source === "yahoo" ? "Yahoo" : "模擬"}</td>
+      <td class="reason-cell">${t.reason ? esc(t.reason) : "—"}</td></tr>`).join("");
+    $("#histTable").innerHTML = `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th><th>價格來源</th><th class="l">理由</th></tr>` +
+      (rows || `<tr><td colspan="10" class="empty">暫時未有成交</td></tr>`);
   } else {
     const list = await api(`${U()}/orders`);
     const rows = list.map((o) => `<tr><td class="l">#${o.id}</td><td class="l">${tHK(o.created_at_iso)}</td>
       <td class="l"><span class="sym" data-sym="${esc(o.symbol)}">${esc(o.symbol)}</span></td>
       <td><span class="pill ${o.side}">${SIDE[o.side]}</span></td><td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td>
       <td>${o.limit_price == null ? "-" : fmtPx(o.limit_price)}</td><td>${o.fill_price == null ? "-" : fmtPx(o.fill_price)}</td>
-      <td><span class="pill ${o.status}">${STATUS[o.status]}</span></td><td class="l">${tHK(o.updated_at_iso)}</td></tr>`).join("");
-    $("#histTable").innerHTML = `<tr><th class="l">單號</th><th class="l">落單時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th>成交價</th><th>狀態</th><th class="l">更新時間</th></tr>` +
-      (rows || `<tr><td colspan="10" class="empty">暫時未有訂單</td></tr>`);
+      <td><span class="pill ${o.status}">${STATUS[o.status]}</span></td>
+      <td class="reason-cell">${o.reason ? esc(o.reason) : "—"}</td>
+      <td class="l">${tHK(o.updated_at_iso)}</td></tr>`).join("");
+    $("#histTable").innerHTML = `<tr><th class="l">單號</th><th class="l">落單時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th>成交價</th><th>狀態</th><th class="l">理由</th><th class="l">更新時間</th></tr>` +
+      (rows || `<tr><td colspan="11" class="empty">暫時未有訂單</td></tr>`);
   }
 }
 async function refreshAccount() {
@@ -482,6 +542,10 @@ function init() {
   $("#qtyPlus").onclick = () => { $("#oQty").value = (Number($("#oQty").value) || 0) + lot(); updateEstimate(); };
   $("#qtyMinus").onclick = () => { $("#oQty").value = Math.max(lot(), (Number($("#oQty").value) || 0) - lot()); updateEstimate(); };
   $("#orderForm").addEventListener("submit", submitOrder);
+  if ($("#reasonCancel")) $("#reasonCancel").onclick = () => openReasonModal(false);
+  if ($("#reasonForm")) $("#reasonForm").addEventListener("submit", confirmReasonOrder);
+  const reasonModal = $("#reasonModal");
+  if (reasonModal) reasonModal.addEventListener("click", (e) => { if (e.target === reasonModal) openReasonModal(false); });
   $("#logoutBtn").onclick = logout;
   $("#changePwBtn").onclick = () => openPw(true);
   $("#pwCancel").onclick = () => openPw(false);
@@ -532,7 +596,10 @@ if ($("#nameForm")) $("#nameForm").addEventListener("submit", changeUsername);
   const uvModal = $("#userViewModal");
   if (uvModal) uvModal.addEventListener("click", (e) => { if (e.target === uvModal) openUserView(false); });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && uvModal && !uvModal.classList.contains("hidden")) openUserView(false);
+    if (e.key !== "Escape") return;
+    if (uvModal && !uvModal.classList.contains("hidden")) openUserView(false);
+    const rm = $("#reasonModal");
+    if (rm && !rm.classList.contains("hidden")) openReasonModal(false);
   });
   document.body.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-view-user]");
