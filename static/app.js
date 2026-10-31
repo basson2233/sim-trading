@@ -427,7 +427,8 @@ async function viewUserPortfolio(username) {
     const t = v.total || {};
     $("#uvTitle").textContent = `${v.username} 嘅持倉`;
     $("#uvSummary").innerHTML =
-      `總資產 <b>USD ${fmt(t.equity)}</b>　·　總盈虧 <b class="${cls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</b>　·　回報率 <b class="${cls(t.return_pct)}">${pct(t.return_pct)}</b>`;
+      `總資產 <b>USD ${fmt(t.equity)}</b>　·　總盈虧 <b class="${cls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</b>　·　回報率 <b class="${cls(t.return_pct)}">${pct(t.return_pct)}</b>` +
+      `　·　<span class="muted">成交理由公開可見</span>`;
     const posRows = (v.positions || []).map((x) => `<tr>
       <td class="l">${esc(x.symbol)}</td><td class="l">${esc(x.name)}</td>
       <td>${x.currency}</td><td>${fmt(x.qty, 0)}</td>
@@ -445,10 +446,11 @@ async function viewUserPortfolio(username) {
       <td>${fmt(tr.qty, 0)}</td><td>${fmtPx(tr.price)}</td>
       <td>${tr.currency} ${fmt(tr.amount)}</td>
       <td class="${cls(tr.realized_pnl)}">${tr.realized_pnl == null ? "-" : sign(tr.realized_pnl) + fmt(tr.realized_pnl)}</td>
+      <td class="l reason-cell"><span class="reason-text">${tr.reason ? esc(tr.reason) : "—"}</span></td>
     </tr>`).join("");
     $("#uvTradeTable").innerHTML =
-      `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th></tr>` +
-      (tradeRows || `<tr><td colspan="8" class="empty">暫時未有成交</td></tr>`);
+      `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th><th class="l">理由</th></tr>` +
+      (tradeRows || `<tr><td colspan="9" class="empty">暫時未有成交</td></tr>`);
   } catch (e) {
     $("#uvSummary").textContent = "❌ " + e.message;
   }
