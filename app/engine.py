@@ -5,10 +5,13 @@ Design
 - Starting capital is USD 1,000,000 for every account (no HKD wallet).
 - Leaderboard / combined totals use USD as the base currency.
 - No trading fees (by request).
-- Market orders fill immediately at the current quote. Limit orders fill immediately if
-  marketable, otherwise rest as PENDING with cash (buy) or shares (sell) reserved, and are
-  filled by process_pending() when the market price crosses the limit (filled at the
-  market price at that moment, which is at least as good as the limit).
+- Market orders fill immediately at the current quote during RTH only. During PRE/AFTER
+  (extended hours) only LIMIT orders are accepted; MARKET is rejected. During CLOSED,
+  MARKET is rejected and LIMIT orders queue as PENDING until the next open session.
+- Limit orders fill immediately if marketable in an open session (PRE/RTH/AFTER), otherwise
+  rest as PENDING with cash (buy) or shares (sell) reserved, and are filled by
+  process_pending() when the session quote crosses the limit (filled at the session
+  price at that moment, which is at least as good as the limit). No overnight/24h matching.
 """
 import re
 import sqlite3
@@ -16,6 +19,12 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from .market_session import (
+    SESSION_CLOSED,
+    allow_market_orders,
+    is_open_for_matching,
+    session_at,
+)
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 
 HKT = timezone(timedelta(hours=8))
@@ -108,7 +117,8 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     price_source TEXT,
-    reason TEXT
+    reason TEXT,
+    session TEXT                 -- PRE | RTH | AFTER | CLOSED at place (and fill session on trades)
 );
 CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +134,8 @@ CREATE TABLE IF NOT EXISTS trades (
     realized_pnl REAL,
     executed_at REAL NOT NULL,
     price_source TEXT,
-    reason TEXT
+    reason TEXT,
+    session TEXT                 -- PRE | RTH | AFTER at fill time
 );
 CREATE INDEX IF NOT EXISTS ix_orders_user ON orders(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_trades_user ON trades(user_id);
@@ -207,9 +218,11 @@ class LockedDB:
 
 
 class Engine:
-    def __init__(self, db_path, feed, initial_cash=None):
+    def __init__(self, db_path, feed, initial_cash=None, session_fn=None):
         self.feed = feed
         self.initial_cash = dict(initial_cash or DEFAULT_INITIAL_CASH)
+        # Injectable clock for tests; production uses live America/New_York session.
+        self.session_fn = session_fn or session_at
         self.lock = threading.RLock()
         con = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
         con.row_factory = sqlite3.Row
@@ -218,6 +231,7 @@ class Engine:
         self._migrate_pre_schema()
         self.db.executescript(SCHEMA)
         self._migrate_trade_reason()
+        self._migrate_session_column()
         self._migrate_usd_only_capital()
 
     def _migrate_pre_schema(self):
@@ -244,6 +258,13 @@ class Engine:
             cols = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
             if cols and "reason" not in cols:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN reason TEXT")
+
+    def _migrate_session_column(self):
+        """Add orders.session / trades.session for extended-hours tagging."""
+        for table in ("orders", "trades"):
+            cols = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if cols and "session" not in cols:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN session TEXT")
 
     def _migrate_usd_only_capital(self):
         """One-shot: drop HKD wallets, set everyone to USD 1M starting capital, clear trades."""
@@ -532,14 +553,37 @@ class Engine:
             raise TradingError("交易理由唔可以超過 500 字")
         return s
 
-    def place_order(self, username, symbol, side, order_type, qty, limit_price=None, reason=None):
+    def place_order(self, username, symbol, side, order_type, qty, limit_price=None, reason=None,
+                    session=None):
+        """Place an order.
+
+        `session` may be omitted (use live clock) or set to ``extended`` to force
+        extended-hours rules (LIMIT only). Stored session tag is always the live
+        market session at place time (PRE/RTH/AFTER/CLOSED).
+        """
         reason = self._normalize_reason(reason)
         side = (side or "").upper()
         order_type = (order_type or "").upper()
+        force_extended = False
+        if session is not None and str(session).strip() != "":
+            sess_req = str(session).strip().upper()
+            if sess_req in ("EXTENDED", "EXT", "PRE", "AFTER"):
+                force_extended = True
+            elif sess_req not in ("RTH", "REGULAR", "AUTO", "CLOSED"):
+                raise TradingError("session 必須係 extended / RTH，或留空用當前市況")
         if side not in ("BUY", "SELL"):
             raise TradingError("買賣方向必須係 BUY 或 SELL")
         if order_type not in ("MARKET", "LIMIT"):
             raise TradingError("訂單類型必須係 MARKET（市價）或 LIMIT（限價）")
+        live_session = self.session_fn()
+        if not allow_market_orders(live_session, force_extended=force_extended):
+            if order_type == "MARKET":
+                if live_session == SESSION_CLOSED and not force_extended:
+                    raise TradingError(
+                        "而家係收市時段（CLOSED），市價單唔接受；可用限價單排隊等下一段開市")
+                raise TradingError(
+                    f"盤前／盤後（或延長時段）只接受限價單（LIMIT），唔接受市價單"
+                    f"（而家時段：{live_session}）")
         try:
             symbol = normalize(symbol)
         except SymbolError as e:
@@ -567,14 +611,19 @@ class Engine:
         else:
             limit_price = None
 
-        q = self._quote(symbol)  # network call outside the lock
+        q = self._quote(symbol)  # network call outside the lock; quote carries session tag
+        place_session = getattr(q, "session", None) or live_session
         with self.lock:
             u = self._user(username)
             ccy = currency_of(symbol)
-            marketable = (order_type == "MARKET"
-                          or (side == "BUY" and q.price <= limit_price)
-                          or (side == "SELL" and q.price >= limit_price))
-            check_price = q.price if marketable else limit_price
+            # CLOSED: never immediate-fill — queue LIMIT for next open session
+            can_match_now = is_open_for_matching(place_session)
+            marketable = False
+            if can_match_now:
+                marketable = (order_type == "MARKET"
+                              or (side == "BUY" and q.price <= limit_price)
+                              or (side == "SELL" and q.price >= limit_price))
+            check_price = q.price if marketable else (limit_price if limit_price is not None else q.price)
             with self._tx() as db:
                 cash = db.execute("SELECT * FROM cash WHERE user_id=? AND currency=?", (u["id"], ccy)).fetchone()
                 pos = db.execute("SELECT * FROM positions WHERE user_id=? AND symbol=?", (u["id"], symbol)).fetchone()
@@ -588,14 +637,17 @@ class Engine:
                     if qty > held:
                         raise TradingError(f"可賣股數不足：想賣 {qty}，可賣 {held}")
                 now = _now()
+                # Prefer quote.price_source for fill audit; keep feed source in parallel via q.source
+                audit_source = getattr(q, "price_source", None) or q.source
                 cur = db.execute(
                     "INSERT INTO orders(user_id,symbol,name,currency,side,type,qty,limit_price,status,"
-                    "created_at,updated_at,price_source,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (u["id"], symbol, q.name, ccy, side, order_type, qty, limit_price, "PENDING", now, now, q.source,
-                     reason))
+                    "created_at,updated_at,price_source,reason,session) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (u["id"], symbol, q.name, ccy, side, order_type, qty, limit_price, "PENDING",
+                     now, now, audit_source, reason, place_session))
                 oid = cur.lastrowid
                 if marketable:
-                    self._fill(db, oid, q.price, q.source)
+                    self._fill(db, oid, q.price, audit_source, fill_session=place_session)
                 else:
                     if side == "BUY":
                         amt = _r2(limit_price * qty)
@@ -607,7 +659,7 @@ class Engine:
                                    (qty, u["id"], symbol))
             return self.get_order(oid)
 
-    def _fill(self, db, order_id, price, source, resting=False):
+    def _fill(self, db, order_id, price, source, resting=False, fill_session=None):
         """Execute an order at `price`. `resting=True` means it was a resting limit order whose
         cash / shares were reserved and must be released first."""
         o = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
@@ -643,13 +695,15 @@ class Engine:
             else:
                 db.execute("UPDATE positions SET qty=? WHERE user_id=? AND symbol=?", (left, uid, sym))
         now = _now()
-        db.execute("UPDATE orders SET status='FILLED', fill_price=?, reserved_amount=0, updated_at=?, price_source=? "
-                   "WHERE id=?", (price, now, source, order_id))
+        fill_sess = fill_session or self.session_fn()
+        db.execute("UPDATE orders SET status='FILLED', fill_price=?, reserved_amount=0, updated_at=?, "
+                   "price_source=?, session=? WHERE id=?",
+                   (price, now, source, fill_sess, order_id))
         trade_reason = o["reason"] if "reason" in o.keys() else None
         db.execute("INSERT INTO trades(user_id,order_id,symbol,name,currency,side,qty,price,amount,realized_pnl,"
-                   "executed_at,price_source,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   "executed_at,price_source,reason,session) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                    (uid, order_id, sym, o["name"], ccy, o["side"], qty, price, amount, realized, now, source,
-                    trade_reason))
+                    trade_reason, fill_sess))
         self._sync_curriculum_compliance(db, uid, now=now)
 
     def cancel_order(self, username, order_id):
@@ -705,7 +759,14 @@ class Engine:
             return d
 
     def process_pending(self):
-        """Fill resting limit orders whose limit has been reached. Returns list of filled order ids."""
+        """Fill resting limit orders whose limit has been reached. Returns list of filled order ids.
+
+        Matching only runs during PRE / RTH / AFTER. CLOSED skips fills (queued overnight).
+        Extended sessions use the session quote (pre/post or regular_fallback).
+        """
+        live = self.session_fn()
+        if not is_open_for_matching(live):
+            return []
         pending = self.db.execute("SELECT id, symbol, side, limit_price FROM orders WHERE status='PENDING'").fetchall()
         quotes, filled = {}, []
         for o in pending:
@@ -722,11 +783,13 @@ class Engine:
                   (o["side"] == "SELL" and q.price >= o["limit_price"])
             if not hit:
                 continue
+            audit_source = getattr(q, "price_source", None) or q.source
+            fill_sess = getattr(q, "session", None) or live
             with self.lock:
                 with self._tx() as db:
                     cur = db.execute("SELECT status FROM orders WHERE id=?", (o["id"],)).fetchone()
                     if cur and cur["status"] == "PENDING":
-                        self._fill(db, o["id"], q.price, q.source, resting=True)
+                        self._fill(db, o["id"], q.price, audit_source, resting=True, fill_session=fill_sess)
                         filled.append(o["id"])
         return filled
 

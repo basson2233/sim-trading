@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from .auth import AuthError, AuthService, GoogleOAuth, RateLimited
 from .auth import OAUTH_STATE_TTL
 from .engine import Engine, TradingError
+from .market_session import market_session_info
 from .quotes import RANGES, UnknownSymbol, make_feed
 from .symbols import SymbolError, currency_of, lot_size, market_of, normalize
 from .universe import suggest_symbols
@@ -223,6 +224,8 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         qty: float
         limit_price: Optional[float] = None
         reason: Optional[str] = None  # optional; blank/omit → null; max 500 after trim
+        # optional: "extended" forces LIMIT-only rules; omit = use live session
+        session: Optional[str] = None
 
     class ReasonIn(BaseModel):
         reason: Optional[str] = None  # omit/blank clears; max 500 after trim
@@ -369,6 +372,12 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
         h["currency"] = currency_of(sym)
         return h
 
+    @app.get("/api/market/session")
+    def market_session(user=Depends(current_user)):
+        """US equity session clock (America/New_York): PRE / RTH / AFTER / CLOSED.
+        Extended hours (pre+after) supported; overnight/24h not supported."""
+        return market_session_info().to_dict()
+
     # ------------------------------------------------------------- the logged-in user's account
     @app.get("/api/me/portfolio")
     def portfolio(user=Depends(current_user)):
@@ -385,7 +394,7 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     @app.post("/api/me/orders")
     def place(body: OrderIn, user=Depends(current_user)):
         return guard(engine.place_order, user["username"], body.symbol, body.side, body.type, body.qty,
-                     body.limit_price, reason=body.reason)
+                     body.limit_price, reason=body.reason, session=body.session)
 
     @app.post("/api/me/orders/{order_id}/cancel")
     def cancel(order_id: int, user=Depends(current_user)):

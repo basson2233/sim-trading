@@ -3,6 +3,10 @@
 YahooFeed  - real (delayed) quotes from Yahoo Finance's public chart endpoint, cached.
 SimFeed    - offline random-walk feed, clearly labelled source="simulated".
 AutoFeed   - tries Yahoo first and falls back to SimFeed per request if Yahoo is unreachable.
+
+Extended hours: during PRE/AFTER, Yahoo prefers preMarketPrice / postMarketPrice when
+present; otherwise falls back to regularMarketPrice with price_source=regular_fallback.
+Overnight (24h) is not supported.
 """
 import hashlib
 import math
@@ -10,10 +14,16 @@ import random
 import threading
 import time
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 
 import requests
 
+from .market_session import (
+    SESSION_AFTER,
+    SESSION_PRE,
+    SESSION_RTH,
+    is_extended,
+    session_at,
+)
 from .symbols import currency_of, market_of
 
 HK_TZ_OFFSET = 8 * 3600
@@ -26,8 +36,11 @@ class Quote:
     currency: str
     price: float
     prev_close: float
-    source: str  # "yahoo" | "simulated"
+    source: str  # "yahoo" | "simulated" | "test"
     as_of: float  # unix ts
+    session: str = SESSION_RTH  # PRE | RTH | AFTER | CLOSED
+    # How the `price` was chosen: extended | regular | regular_fallback | simulated
+    price_source: str = "regular"
 
     @property
     def change(self):
@@ -61,6 +74,33 @@ RANGES = {
     "1Y": ("1y", "1d"),
     "5Y": ("5y", "1wk"),
 }
+
+
+def _pick_yahoo_price(meta: dict, session: str):
+    """Choose quote price for the current session from Yahoo chart meta.
+
+    Returns (price, price_source, as_of_unix).
+    """
+    regular = meta.get("regularMarketPrice")
+    regular_time = meta.get("regularMarketTime")
+    if session == SESSION_PRE:
+        pre = meta.get("preMarketPrice")
+        if pre is not None:
+            return float(pre), "extended", float(meta.get("preMarketTime") or regular_time or time.time())
+        if regular is None:
+            return None, None, None
+        return float(regular), "regular_fallback", float(regular_time or time.time())
+    if session == SESSION_AFTER:
+        post = meta.get("postMarketPrice")
+        if post is not None:
+            return float(post), "extended", float(meta.get("postMarketTime") or regular_time or time.time())
+        if regular is None:
+            return None, None, None
+        return float(regular), "regular_fallback", float(regular_time or time.time())
+    # RTH / CLOSED: use regular
+    if regular is None:
+        return None, None, None
+    return float(regular), "regular", float(regular_time or time.time())
 
 
 class YahooFeed:
@@ -102,7 +142,8 @@ class YahooFeed:
     def quote(self, symbol):
         res = self._fetch(symbol, "1d", "5m", self.quote_ttl)
         m = res["meta"]
-        price = m.get("regularMarketPrice")
+        sess = session_at()
+        price, price_source, as_of = _pick_yahoo_price(m, sess)
         if price is None:
             raise UnknownSymbol(f"{symbol} 冇報價")
         return Quote(
@@ -112,7 +153,9 @@ class YahooFeed:
             price=float(price),
             prev_close=float(m.get("chartPreviousClose") or m.get("previousClose") or price),
             source="yahoo",
-            as_of=float(m.get("regularMarketTime") or time.time()),
+            as_of=float(as_of),
+            session=sess,
+            price_source=price_source,
         )
 
     def history(self, symbol, range_key):
@@ -177,7 +220,12 @@ class SimFeed:
                 st["t"] = now
             tick = 0.01 if market_of(symbol) == "US" else 0.001
             price = max(round(round(st["price"] / tick) * tick, 3), 0.01)
-            return Quote(symbol, f"{symbol}（模擬）", currency_of(symbol), price, st["prev"], "simulated", now)
+            sess = session_at()
+            # Simulated feed has no separate pre/post print — tag as extended when in PRE/AFTER
+            # so matching still works; price_source distinguishes from a real Yahoo extended print.
+            price_source = "extended" if is_extended(sess) else "simulated"
+            return Quote(symbol, f"{symbol}（模擬）", currency_of(symbol), price, st["prev"],
+                         "simulated", now, session=sess, price_source=price_source)
 
     def history(self, symbol, range_key):
         _, interval = RANGES[range_key]
