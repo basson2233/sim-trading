@@ -131,3 +131,19 @@ button.user-link:hover{color:#93c5fd}
 textarea{background:#0b0f14;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:14px;width:100%;font-family:inherit;resize:vertical;min-height:88px;line-height:1.5}
 textarea:focus{outline:none;border-color:var(--accent)}
 .reason-cell{max-width:260px;white-space:normal;word-break:break-word;text-align:left;color:var(--muted);font-size:12px}.reason-cell .reason-text{margin-right:6px}.reason-cell .btn.small{padding:2px 8px;font-size:11px;vertical-align:middle}
+
+/* ---- market session / extended hours ---- */
+.badge.session{background:#1e293b;color:var(--muted)}
+.badge.session.PRE{background:rgba(59,130,246,.18);color:#93c5fd}
+.badge.session.RTH{background:rgba(22,199,132,.15);color:var(--up)}
+.badge.session.AFTER{background:rgba(245,158,11,.18);color:var(--warn)}
+.badge.session.CLOSED{background:rgba(139,151,167,.18);color:var(--muted)}
+.overnight-note{font-size:11px;white-space:nowrap}
+.session-warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.45);color:var(--warn);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;line-height:1.5}
+.ext-hours-note{display:block;margin-top:-4px}
+.seg button:disabled{opacity:.45;cursor:not-allowed}
+.pill.session{font-size:11px;padding:1px 7px;border-radius:999px;background:#1e293b;color:var(--muted);margin-left:4px}
+.pill.session.PRE{background:rgba(59,130,246,.18);color:#93c5fd}
+.pill.session.RTH{background:rgba(22,199,132,.15);color:var(--up)}
+.pill.session.AFTER{background:rgba(245,158,11,.18);color:var(--warn)}
+.pill.session.CLOSED{background:rgba(139,151,167,.18);color:var(--muted)}

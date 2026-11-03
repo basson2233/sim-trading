@@ -10,6 +10,7 @@ const pct = (n) => n == null ? "-" : `${sign(n)}${fmt(n, 2)}%`;
 const tHK = (iso) => iso ? iso.replace("T", " ").slice(0, 19).replace(/\+08:00$/, "") : "-";
 const SIDE = {BUY: "買入", SELL: "賣出"}, TYPE = {MARKET: "市價", LIMIT: "限價"};
 const STATUS = {FILLED: "已成交", PENDING: "等待成交", CANCELLED: "已取消"};
+const SESSION_LABEL = {PRE: "盤前", RTH: "日盤", AFTER: "盤後", CLOSED: "休市"};
 const QUICK = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "JPM", "SPY"];
 const RANGES = [["1D", "1日"], ["5D", "5日"], ["1M", "1個月"], ["6M", "6個月"], ["1Y", "1年"], ["5Y", "5年"]];
 
@@ -18,6 +19,7 @@ const state = {
   symbol: (() => { const s = localStorage.getItem("simSymbol") || "AAPL"; return s.endsWith(".HK") ? "AAPL" : s; })(),
   quote: null, range: "1M", side: "BUY", type: "MARKET", hist: "trades",
   portfolio: null, chart: null,
+  session: null, // PRE | RTH | AFTER | CLOSED
 };
 
 async function api(path, opts = {}) {
@@ -85,6 +87,63 @@ async function changeEmail(e) {
     $("#userEmail").textContent = "";
     openEmail(false); toast("電郵已更改 ✅");
   } catch (err) { m.className = "msg err"; m.textContent = "❌ " + err.message; }
+}
+
+
+// ---------------------------------------------------------------- market session (extended hours)
+function sessionTagHtml(session) {
+  if (!session || !SESSION_LABEL[session]) return "";
+  return `<span class="pill session ${esc(session)}">${SESSION_LABEL[session]}</span>`;
+}
+function marketAllows() {
+  // Unknown session → keep prior RTH-like UX until API responds
+  // RTH: market + limit; PRE/AFTER/CLOSED: limit only
+  if (!state.session) return true;
+  return state.session === "RTH";
+}
+function applySessionUi() {
+  const sess = state.session;
+  const badge = $("#sessionBadge");
+  if (badge) {
+    const label = SESSION_LABEL[sess] || "…";
+    badge.textContent = "時段：" + label;
+    badge.className = "badge session" + (sess ? " " + sess : "");
+  }
+  const warn = $("#sessionWarn");
+  if (warn) warn.classList.toggle("hidden", !(sess === "PRE" || sess === "AFTER"));
+  const note = $("#extHoursNote");
+  if (note) note.classList.toggle("hidden", !(sess === "PRE" || sess === "AFTER" || sess === "CLOSED"));
+  const overnight = $("#overnightNote");
+  if (overnight) overnight.classList.toggle("hidden", false); // always muted note per docs
+
+  const mktBtn = $("#typeSeg button[data-v=MARKET]");
+  const limBtn = $("#typeSeg button[data-v=LIMIT]");
+  const allowMkt = marketAllows();
+  if (mktBtn) {
+    mktBtn.disabled = !allowMkt;
+    if (!allowMkt) {
+      mktBtn.classList.remove("on");
+      if (limBtn) limBtn.classList.add("on");
+      if (state.type === "MARKET") {
+        state.type = "LIMIT";
+        const limRow = $("#limitRow");
+        if (limRow) limRow.classList.remove("hidden");
+        if (state.quote && $("#oLimit") && !$("#oLimit").value) $("#oLimit").value = state.quote.price;
+        updateEstimate();
+      }
+    } else {
+      mktBtn.disabled = false;
+    }
+  }
+}
+async function fetchMarketSession() {
+  try {
+    const data = await api("/api/market/session");
+    state.session = data.session || null;
+    applySessionUi();
+  } catch (e) {
+    // keep last known session; badge stays as-is
+  }
 }
 
 // ---------------------------------------------------------------- quote + chart
@@ -257,10 +316,16 @@ function submitOrder(ev) {
   ev.preventDefault();
   const q = state.quote; if (!q) return;
   const qty = Number($("#oQty").value);
+  const msg = $("#orderMsg");
   if (!qty || qty <= 0) {
-    const msg = $("#orderMsg");
     msg.className = "msg err";
     msg.textContent = "❌ 請輸入有效數量";
+    return;
+  }
+  if (state.type === "MARKET" && !marketAllows()) {
+    msg.className = "msg err";
+    msg.textContent = "❌ 延長時段／休市只接受限價單";
+    applySessionUi();
     return;
   }
   const body = {symbol: q.symbol, side: state.side, type: state.type, qty};
@@ -353,7 +418,7 @@ function renderPositions(p) {
 function renderOpen(list) {
   const rows = list.map((o) => `<tr><td class="l">#${o.id}</td><td class="l">${tHK(o.created_at_iso)}</td>
     <td class="l"><span class="sym" data-sym="${esc(o.symbol)}">${esc(o.symbol)}</span></td><td><span class="pill ${o.side}">${SIDE[o.side]}</span></td>
-    <td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td><td>${fmtPx(o.limit_price)}</td>
+    <td>${TYPE[o.type]}${sessionTagHtml(o.session)}</td><td>${fmt(o.qty, 0)}</td><td>${fmtPx(o.limit_price)}</td>
     ${reasonCellHtml("order", o.id, o.reason)}
     <td><button class="btn ghost small" data-cancel="${o.id}">取消</button></td></tr>`).join("");
   $("#openTable").innerHTML = `<tr><th class="l">單號</th><th class="l">時間 (HKT)</th><th class="l">代號</th><th>方向</th><th>類型</th><th>數量</th><th>限價</th><th class="l">理由</th><th></th></tr>` +
@@ -368,7 +433,7 @@ async function renderHistory() {
       <td><span class="pill ${t.side}">${SIDE[t.side]}</span></td><td>${fmt(t.qty, 0)}</td><td>${fmtPx(t.price)}</td>
       <td>${t.currency} ${fmt(t.amount)}</td>
       <td class="${cls(t.realized_pnl)}">${t.realized_pnl == null ? "-" : sign(t.realized_pnl) + fmt(t.realized_pnl)}</td>
-      <td>${t.price_source === "yahoo" ? "Yahoo" : "模擬"}</td>
+      <td>${t.price_source === "yahoo" ? "Yahoo" : "模擬"}${sessionTagHtml(t.session)}</td>
       ${reasonCellHtml("trade", t.id, t.reason)}</tr>`).join("");
     $("#histTable").innerHTML = `<tr><th class="l">成交時間 (HKT)</th><th class="l">代號</th><th class="l">名稱</th><th>方向</th><th>數量</th><th>成交價</th><th>金額</th><th>已實現盈虧</th><th>價格來源</th><th class="l">理由</th></tr>` +
       (rows || `<tr><td colspan="10" class="empty">暫時未有成交</td></tr>`);
@@ -376,7 +441,7 @@ async function renderHistory() {
     const list = await api(`${U()}/orders`);
     const rows = list.map((o) => `<tr><td class="l">#${o.id}</td><td class="l">${tHK(o.created_at_iso)}</td>
       <td class="l"><span class="sym" data-sym="${esc(o.symbol)}">${esc(o.symbol)}</span></td>
-      <td><span class="pill ${o.side}">${SIDE[o.side]}</span></td><td>${TYPE[o.type]}</td><td>${fmt(o.qty, 0)}</td>
+      <td><span class="pill ${o.side}">${SIDE[o.side]}</span></td><td>${TYPE[o.type]}${sessionTagHtml(o.session)}</td><td>${fmt(o.qty, 0)}</td>
       <td>${o.limit_price == null ? "-" : fmtPx(o.limit_price)}</td><td>${o.fill_price == null ? "-" : fmtPx(o.fill_price)}</td>
       <td><span class="pill ${o.status}">${STATUS[o.status]}</span></td>
       ${reasonCellHtml("order", o.id, o.reason)}
@@ -600,8 +665,19 @@ function init() {
     }
   });
   seg("#sideSeg", "side", updateEstimate);
-  seg("#typeSeg", "type", () => { $("#limitRow").classList.toggle("hidden", state.type !== "LIMIT");
-    if (state.type === "LIMIT" && state.quote) $("#oLimit").value = state.quote.price; updateEstimate(); });
+  // typeSeg: ignore MARKET clicks outside RTH
+  $("#typeSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b || b.disabled) return;
+    if (b.dataset.v === "MARKET" && !marketAllows()) {
+      applySessionUi();
+      return;
+    }
+    $$("#typeSeg button").forEach((x) => x.classList.toggle("on", x === b));
+    state.type = b.dataset.v;
+    $("#limitRow").classList.toggle("hidden", state.type !== "LIMIT");
+    if (state.type === "LIMIT" && state.quote) $("#oLimit").value = state.quote.price;
+    updateEstimate();
+  });
   seg("#histSeg", "hist", renderHistory);
   ["#oQty", "#oLimit"].forEach((s) => $(s).addEventListener("input", updateEstimate));
   $("#qtyPlus").onclick = () => { $("#oQty").value = (Number($("#oQty").value) || 0) + lot(); updateEstimate(); };
@@ -682,8 +758,9 @@ if ($("#nameForm")) $("#nameForm").addEventListener("submit", changeUsername);
   window.addEventListener("resize", () => drawChart());
   window.addEventListener("hashchange", route);
   route();
-  api("/api/auth/me").then((me) => { applyMe(me); refreshAll(); });
+  api("/api/auth/me").then((me) => { applyMe(me); refreshAll(); fetchMarketSession(); });
   setInterval(() => { if (!state.user) return; refreshQuote(); refreshAccount();
     if (!$("#tab-leaderboard").classList.contains("hidden")) loadLeaderboard(); }, 15000);
+  setInterval(() => { if (!state.user) return; fetchMarketSession(); }, 60000);
 }
 init();

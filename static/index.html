@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>模擬股票交易平台</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/style.css?v=20261030r">
+<link rel="stylesheet" href="/static/style.css?v=20261103a">
 </head>
 <body>
 <header class="topbar">
@@ -17,6 +17,8 @@
     <a href="/fighter" class="tab">理財戰士</a>
   </nav>
   <div class="right">
+    <span id="sessionBadge" class="badge session">時段：…</span>
+    <span id="overnightNote" class="muted overnight-note">夜盤暫未支援</span>
     <span id="sourceBadge" class="badge">報價來源：…</span>
     <span class="user">用戶：<b id="userName">-</b> <span id="userEmail" class="muted"></span></span>
     <span class="user-id muted" id="userIdLabel"></span>
@@ -30,6 +32,7 @@
 <main>
 <section id="tab-trade">
   <div class="cards" id="summaryCards"></div>
+  <div id="sessionWarn" class="session-warn hidden" role="status">非常規交易時段，價格同成交可能較差</div>
 
   <div class="grid2">
     <div class="panel">
@@ -63,6 +66,7 @@
           <button type="button" data-v="MARKET" class="on">市價單</button>
           <button type="button" data-v="LIMIT">限價單</button>
         </div>
+        <small id="extHoursNote" class="muted ext-hours-note hidden">延長時段只接受限價單</small>
         <label>股票<input id="oSymbol" readonly></label>
         <label>數量（股）
           <div class="qty">
@@ -216,7 +220,7 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=20261031a"></script>
+<script src="/static/app.js?v=20261103a"></script>
 <script src="/static/curriculum.js?v=20261027d"></script>
 </body>
 </html>
