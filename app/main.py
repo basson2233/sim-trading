@@ -37,6 +37,8 @@ log = logging.getLogger("sim-trading")
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
 COOKIE = "sim_session"
+# Default quick-pick chips (static/app.js QUICK) for /api/symbols/hot
+DEFAULT_HOT_SYMBOLS = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "JPM", "SPY"]
 
 
 def data_dir() -> Path:
@@ -352,6 +354,53 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
                         user=Depends(current_user)):
         """Autocomplete: match built-in US symbols by code prefix or name."""
         return {"query": q, "results": suggest_symbols(q, limit)}
+
+    @app.get("/api/symbols/hot")
+    def symbols_hot(symbols: Optional[str] = Query(None, max_length=256),
+                    user=Depends(current_user)):
+        """Quick-pick symbols ranked by dollar volume (price × regularMarketVolume).
+
+        Optional `symbols` = comma list; default = QUICK chips in static/app.js.
+        Symbols with missing volume are appended last (unsorted among themselves).
+        """
+        raw = symbols if symbols is not None else ",".join(DEFAULT_HOT_SYMBOLS)
+        ordered = []
+        seen = set()
+        for part in raw.split(","):
+            part = (part or "").strip()
+            if not part:
+                continue
+            try:
+                sym = normalize(part)
+            except SymbolError:
+                continue
+            if sym in seen:
+                continue
+            seen.add(sym)
+            ordered.append(sym)
+
+        ranked = []
+        missing = []
+        for sym in ordered:
+            try:
+                q = engine._quote(sym)
+            except TradingError:
+                continue
+            vol = q.volume
+            item = {
+                "symbol": sym,
+                "price": q.price,
+                "volume": vol,
+                "dollarVolume": round(q.dollar_volume, 2) if q.dollar_volume is not None else None,
+                "session": q.session,
+                "price_source": q.price_source,
+            }
+            if vol is None:
+                missing.append(item)
+            else:
+                ranked.append(item)
+        ranked.sort(key=lambda x: x["dollarVolume"], reverse=True)
+        return {"symbols": ranked + missing}
 
     @app.get("/api/quote")
     def quote(symbol: str, user=Depends(current_user)):

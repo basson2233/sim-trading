@@ -41,6 +41,8 @@ class Quote:
     session: str = SESSION_RTH  # PRE | RTH | AFTER | CLOSED
     # How the `price` was chosen: extended | regular | regular_fallback | simulated
     price_source: str = "regular"
+    # Yahoo regularMarketVolume (shares). None when feed has no volume.
+    volume: float | None = None
 
     @property
     def change(self):
@@ -50,10 +52,19 @@ class Quote:
     def change_pct(self):
         return (self.price / self.prev_close - 1) * 100 if self.prev_close else 0.0
 
+    @property
+    def dollar_volume(self):
+        """Display price × regular volume (None if volume missing)."""
+        if self.volume is None:
+            return None
+        return float(self.price) * float(self.volume)
+
     def to_dict(self):
         d = asdict(self)
         d["change"] = round(self.change, 4)
         d["change_pct"] = round(self.change_pct, 3)
+        dv = self.dollar_volume
+        d["dollarVolume"] = round(dv, 2) if dv is not None else None
         return d
 
 
@@ -146,6 +157,8 @@ class YahooFeed:
         price, price_source, as_of = _pick_yahoo_price(m, sess)
         if price is None:
             raise UnknownSymbol(f"{symbol} 冇報價")
+        vol_raw = m.get("regularMarketVolume")
+        volume = float(vol_raw) if vol_raw is not None else None
         return Quote(
             symbol=symbol,
             name=m.get("longName") or m.get("shortName") or symbol,
@@ -156,6 +169,7 @@ class YahooFeed:
             as_of=float(as_of),
             session=sess,
             price_source=price_source,
+            volume=volume,
         )
 
     def history(self, symbol, range_key):

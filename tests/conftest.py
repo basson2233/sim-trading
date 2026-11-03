@@ -11,8 +11,9 @@ from app.symbols import currency_of
 class FakeFeed:
     """Deterministic feed for tests: prices are set explicitly."""
 
-    def __init__(self, prices=None, fx=7.8, session=SESSION_RTH, price_source="regular"):
+    def __init__(self, prices=None, volumes=None, fx=7.8, session=SESSION_RTH, price_source="regular"):
         self.prices = dict(prices or {})
+        self.volumes = dict(volumes or {})
         self.fx = fx
         self.session = session
         self.price_source = price_source
@@ -21,8 +22,9 @@ class FakeFeed:
         if symbol not in self.prices:
             raise UnknownSymbol(f"搵唔到股票代號 {symbol}")
         p = self.prices[symbol]
+        vol = self.volumes.get(symbol)  # may be intentionally absent → None
         return Quote(symbol, f"Name {symbol}", currency_of(symbol), p, p, "test", time.time(),
-                     session=self.session, price_source=self.price_source)
+                     session=self.session, price_source=self.price_source, volume=vol)
 
     def history(self, symbol, range_key):
         return {"symbol": symbol, "range": range_key, "source": "test", "prev_close": None,
