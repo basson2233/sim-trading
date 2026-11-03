@@ -147,3 +147,5 @@ textarea:focus{outline:none;border-color:var(--accent)}
 .pill.session.RTH{background:rgba(22,199,132,.15);color:var(--up)}
 .pill.session.AFTER{background:rgba(245,158,11,.18);color:var(--warn)}
 .pill.session.CLOSED{background:rgba(139,151,167,.18);color:var(--muted)}
+
+.chips-hint{margin:6px 0 0;font-size:11px;line-height:1.4}

@@ -20,6 +20,7 @@ const state = {
   quote: null, range: "1M", side: "BUY", type: "MARKET", hist: "trades",
   portfolio: null, chart: null,
   session: null, // PRE | RTH | AFTER | CLOSED
+  hotSymbols: null,
 };
 
 async function api(path, opts = {}) {
@@ -634,8 +635,29 @@ function wireSuggest() {
 }
 
 
+function renderQuickChips(symbols) {
+  const list = (symbols && symbols.length) ? symbols : QUICK;
+  $("#quickChips").innerHTML = list.map((s) => `<span class="chip" data-sym="${esc(s)}">${esc(s)}</span>`).join("");
+}
+
+async function loadHotSymbols() {
+  if (!state.user) return;
+  try {
+    const data = await api("/api/symbols/hot");
+    const symbols = (data.symbols || []).map((x) => x.symbol).filter(Boolean);
+    if (symbols.length) {
+      state.hotSymbols = symbols;
+      renderQuickChips(symbols);
+    } else if (!state.hotSymbols) {
+      renderQuickChips(QUICK);
+    }
+  } catch {
+    if (!state.hotSymbols) renderQuickChips(QUICK);
+  }
+}
+
 function init() {
-  $("#quickChips").innerHTML = QUICK.map((s) => `<span class="chip" data-sym="${s}">${s}</span>`).join("");
+  renderQuickChips(QUICK);
   $("#ranges").innerHTML = RANGES.map(([k, l]) => `<button data-r="${k}" class="${k === state.range ? "on" : ""}">${l}</button>`).join("");
   $("#ranges").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return;
     state.range = b.dataset.r; $$("#ranges button").forEach((x) => x.classList.toggle("on", x === b)); loadChart(); });
@@ -758,9 +780,10 @@ if ($("#nameForm")) $("#nameForm").addEventListener("submit", changeUsername);
   window.addEventListener("resize", () => drawChart());
   window.addEventListener("hashchange", route);
   route();
-  api("/api/auth/me").then((me) => { applyMe(me); refreshAll(); fetchMarketSession(); });
+  api("/api/auth/me").then((me) => { applyMe(me); refreshAll(); fetchMarketSession(); loadHotSymbols(); });
   setInterval(() => { if (!state.user) return; refreshQuote(); refreshAccount();
     if (!$("#tab-leaderboard").classList.contains("hidden")) loadLeaderboard(); }, 15000);
   setInterval(() => { if (!state.user) return; fetchMarketSession(); }, 60000);
+  setInterval(() => { if (!state.user) return; loadHotSymbols(); }, 240000);
 }
 init();
