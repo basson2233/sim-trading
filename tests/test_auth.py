@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import time
 
@@ -14,6 +15,15 @@ PW = "correct-horse-1"
 def auth(feed):
     return AuthService(Engine(":memory:", feed))
 
+
+
+def _reg(auth, email, name=None, pw=PW):
+    """Unit-test helper: register then optionally rename for readable assertions."""
+    user = auth.register(pw, pw, email)
+    if name:
+        auth.change_username(user["id"], name)
+        user = {"id": user["id"], "username": name}
+    return user
 
 def test_hash_is_salted_scrypt_and_verifies():
     h1, h2 = hash_password(PW), hash_password(PW)
@@ -33,18 +43,33 @@ def test_password_rules():
 
 def test_register_validation(auth):
     with pytest.raises(TradingError, match="唔一樣"):
-        auth.register("alice", PW, PW + "x", "alice@example.com")
+        auth.register(PW, PW + "x", "alice@example.com")
     with pytest.raises(TradingError, match="最少"):
-        auth.register("alice", "1234567", "1234567", "alice@example.com")
-    auth.register("alice", PW, PW, "alice@example.com")
-    with pytest.raises(TradingError, match="已經有人用"):
-        auth.register("alice", PW, PW, "alice@example.com")
-    stored = auth.db.execute("SELECT password_hash FROM users WHERE username='alice'").fetchone()[0]
+        auth.register("1234567", "1234567", "alice@example.com")
+    user = auth.register(PW, PW, "alice@example.com")
+    assert re.fullmatch(r"u\d{6}", user["username"]) or re.fullmatch(r"u[0-9a-f]{8}", user["username"])
+    with pytest.raises(TradingError, match="電郵"):
+        auth.register(PW, PW, "alice@example.com")
+    # client-supplied username is ignored (keyword only)
+    other = auth.register(PW, PW, "bob@example.com", username="should-be-ignored")
+    assert other["username"] != "should-be-ignored"
+    assert re.fullmatch(r"u\d{6}", other["username"]) or re.fullmatch(r"u[0-9a-f]{8}", other["username"])
+    stored = auth.db.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     assert stored.startswith("scrypt$") and PW not in stored
 
 
+def test_register_assigns_privacy_handle_like_google(auth):
+    """Email signup gets the same u###### privacy handle as Google OAuth."""
+    u = auth.register(PW, PW, "privacy@example.com")
+    assert re.fullmatch(r"u\d{6}", u["username"])
+    # rename still works
+    out = auth.change_username(u["id"], "student01")
+    assert out["username"] == "student01"
+    assert auth.authenticate("privacy@example.com", PW)["username"] == "student01"
+
+
 def test_authenticate(auth):
-    auth.register("alice", PW, PW, "alice@example.com")
+    _reg(auth, "alice@example.com", "alice")
     assert auth.authenticate("alice@example.com", PW)["username"] == "alice"
     assert auth.authenticate("Alice@Example.com", PW)["username"] == "alice"  # case-insensitive
     with pytest.raises(AuthError, match="電郵或密碼錯誤"):
@@ -54,7 +79,7 @@ def test_authenticate(auth):
 
 
 def test_account_lockout_after_5_failures(auth):
-    auth.register("alice", PW, PW, "alice@example.com")
+    _reg(auth, "alice@example.com", "alice")
     for _ in range(4):
         with pytest.raises(AuthError):
             auth.authenticate("alice@example.com", "nope-nope", ip="1.1.1.1")
@@ -67,7 +92,7 @@ def test_account_lockout_after_5_failures(auth):
 
 
 def test_successful_login_resets_failure_counter(auth):
-    auth.register("alice", PW, PW, "alice@example.com")
+    _reg(auth, "alice@example.com", "alice")
     for _ in range(4):
         with pytest.raises(AuthError):
             auth.authenticate("alice@example.com", "nope-nope")
@@ -83,12 +108,12 @@ def test_ip_throttle(auth):
             auth.authenticate(f"ghost{i}@example.com", "whatever1", ip="9.9.9.9")
     with pytest.raises(RateLimited):
         auth.authenticate("ghost@example.com", "whatever1", ip="9.9.9.9")
-    auth.register("alice", PW, PW, "alice@example.com")
+    _reg(auth, "alice@example.com", "alice")
     assert auth.authenticate("alice@example.com", PW, ip="8.8.8.8")    # other IPs unaffected
 
 
 def test_sessions(auth):
-    uid = auth.register("alice", PW, PW, "alice@example.com")["id"]
+    uid = _reg(auth, "alice@example.com", "alice")["id"]
     tok = auth.create_session(uid)
     assert auth.session_user(tok)["username"] == "alice"
     assert auth.db.execute("SELECT COUNT(*) FROM sessions WHERE token_hash=?", (tok,)).fetchone()[0] == 0  # raw token not stored
@@ -101,7 +126,7 @@ def test_sessions(auth):
 
 
 def test_change_password(auth):
-    uid = auth.register("alice", PW, PW, "alice@example.com")["id"]
+    uid = _reg(auth, "alice@example.com", "alice")["id"]
     keep, other = auth.create_session(uid), auth.create_session(uid)
     with pytest.raises(TradingError, match="現有密碼錯誤"):
         auth.change_password(uid, "wrong-pass", "new-password-1", "new-password-1")
@@ -132,7 +157,7 @@ def test_migration_removes_legacy_passwordless_users(tmp_path, feed):
     a = AuthService(eng)
     assert sorted(a.migrate_legacy_users()) == sorted(["demo", "小明"])
     assert eng.list_users() == [] and eng.db.execute("SELECT COUNT(*) FROM cash").fetchone()[0] == 0
-    a.register("demo", PW, PW, "demo@example.com")                               # name can be registered again, with a password
+    _reg(a, "demo@example.com", "demo")                               # name can be registered again, with a password
     assert a.migrate_legacy_users() == [] and eng.list_users() == ["demo"]
 
 
@@ -141,7 +166,7 @@ def test_concurrent_access_is_safe(tmp_path, feed):
     import threading
     eng = Engine(str(tmp_path / "c.db"), feed)
     a = AuthService(eng)
-    uid = a.register("alice", PW, PW, "alice@example.com")["id"]
+    uid = _reg(a, "alice@example.com", "alice")["id"]
     tok = a.create_session(uid)
     errors = []
 

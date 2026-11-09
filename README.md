@@ -32,7 +32,7 @@ cd /workspace/sim-trading
 
 ## 功能
 
-- **帳戶**：用戶名 + 密碼 + 電郵註冊 / 登入（`/register`、`/login`），新帳戶自動獲發 **USD 1,000,000**。可以登出、更改密碼、更改電郵、忘記密碼（`/forgot`）。設定咗 Google OAuth 之後可以用 Google 登入。詳見下面「帳戶安全」。
+- **帳戶**：電郵 + 密碼註冊 / 登入（`/register`、`/login`），或 Google 登入。公開顯示名自動分配隱私代號 `u`＋6 位數字（同 Google），之後可改名；新帳戶自動獲發 **USD 1,000,000**。可以登出、更改密碼、更改電郵、忘記密碼（`/forgot`）。詳見下面「帳戶安全」。
 - **代號自動完成**：輸入框邊打邊建議（例如 `AAP`→`AAPL`、中文名「蘋果」），內建美股大型股；港股代號會被拒絕。API：`GET /api/symbols/suggest?q=`。
 - **報價**：Yahoo Finance chart API（後端代取，報價 cache 15 秒，或有約 15 分鐘延遲）；連唔到時自動用 **模擬隨機漫步價格**，介面會清楚標示「模擬價格」。
 - **圖表**：揀股票後顯示價格走勢，可揀 1日 / 5日 / 1個月 / 6個月 / 1年 / 5年，滑鼠移上去睇價格。
@@ -124,7 +124,7 @@ run.sh         一條命令啟動
 
 | Method | Path | 說明 |
 |---|---|---|
-| POST | `/api/auth/register` `{username, email, password, password_confirm}` | 註冊並登入（設 cookie） |
+| POST | `/api/auth/register` `{email, password, password_confirm}`（`username` 可選但會被忽略） | 註冊並登入；回 `{username}` 為伺服器分配嘅 `u######`（設 cookie） |
 | POST | `/api/auth/login` `{email, password}` | 登入（設 cookie） |
 | POST | `/api/auth/logout` | 登出 |
 | GET | `/api/auth/me` | 目前用戶（含電郵、有冇密碼、有冇連結 Google）🔒 |
@@ -133,6 +133,7 @@ run.sh         一條命令啟動
 | POST | `/api/auth/reset` `{token, password, password_confirm}` | 用 token 設新密碼，並登出所有 session |
 | POST | `/api/auth/change-password` `{current_password?, new_password, new_password_confirm}` | 更改密碼 🔒（未有密碼就唔使 current） |
 | POST | `/api/auth/change-email` `{current_password, email}` | 更改電郵 🔒 |
+| POST | `/api/auth/change-username` `{username}` | 更改公開顯示名 🔒 |
 | GET | `/auth/google/start` | 轉去 Google（未設定 client id 就 400） |
 | GET | `/auth/google/callback` | Google 導回；成功就設 session cookie 並轉去 `/` |
 | GET | `/api/quote?symbol=AAPL` | 報價（含每手股數、價格來源）🔒 |
@@ -157,7 +158,7 @@ run.sh         一條命令啟動
 
 ```bash
 curl -c jar.txt -X POST localhost:8000/api/auth/register -H 'Content-Type: application/json' \
-     -d '{"username":"demo","password":"demo-pass-123","password_confirm":"demo-pass-123"}'
+     -d '{"email":"demo@example.com","password":"demo-pass-123","password_confirm":"demo-pass-123"}'
 curl -b jar.txt -X POST localhost:8000/api/me/orders -H 'Content-Type: application/json' \
      -d '{"symbol":"0700.HK","side":"BUY","type":"MARKET","qty":300}'
 curl -b jar.txt localhost:8000/api/me/portfolio

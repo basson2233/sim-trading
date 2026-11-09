@@ -1,3 +1,4 @@
+import re
 """Forgot-password and Google sign-in. Google's HTTP is mocked; nothing is called for real."""
 import time
 from urllib.parse import parse_qs, urlparse
@@ -49,8 +50,10 @@ def client(app):
 
 
 def register(c, name="alice", email="alice@example.com", pw=PW):
-    r = c.post("/api/auth/register", json={"username": name, "password": pw, "password_confirm": pw, "email": email})
+    r = c.post("/api/auth/register", json={"password": pw, "password_confirm": pw, "email": email})
     assert r.status_code == 200, r.text
+    ren = c.post("/api/auth/change-username", json={"username": name})
+    assert ren.status_code == 200, ren.text
     return r
 
 
@@ -126,7 +129,7 @@ def test_reset_single_use_expiry_kills_sessions_and_email_unique(feed, tmp_path)
     assert expired.status_code == 400
 
     # email uniqueness is case-insensitive
-    dup = c.post("/api/auth/register", json={"username": "bob", "password": PW, "password_confirm": PW,
+    dup = c.post("/api/auth/register", json={"password": PW, "password_confirm": PW,
                                              "email": "ALICE@example.com"})
     assert dup.status_code == 400 and "電郵" in dup.json()["detail"]
     assert c.post("/api/auth/change-email", json={"current_password": "brand-new-pw",
@@ -258,7 +261,7 @@ def test_google_creates_new_user(feed, tmp_path):
     g = GoogleOAuth("cid", "sec", "http://localhost:8000", http=http)
     app = make_app(feed, tmp_path, google=g)
     c = client(app)
-    # username taken, so the derived name must be made unique
+    # existing email user does not affect Google privacy handle assignment
     register(c, "newperson", "someoneelse@example.com")
     c.post("/api/auth/logout")
     start = c.get("/auth/google/start")
@@ -266,15 +269,18 @@ def test_google_creates_new_user(feed, tmp_path):
     r = c.get("/auth/google/callback", params={"code": "the-code", "state": st})
     assert r.status_code == 303
     me = c.get("/api/auth/me").json()
-    assert me["username"] == "newperson2" and me["email"] == "new.person@example.com"
+    assert re.fullmatch(r"u\d{6}", me["username"]) or re.fullmatch(r"u[0-9a-f]{8}", me["username"])
+    assert me["username"] != "newperson"
+    assert me["email"] == "new.person@example.com"
     assert me["has_password"] is False and me["google"] is True and me["email_verified"] is True
-    p = c.get("/api/me/portfolio").json()
-    assert [a["currency"] for a in p["accounts"]] == ["USD"]
-    assert next(a for a in p["accounts"] if a["currency"] == "USD")["cash"] == DEFAULT_INITIAL_CASH["USD"]
+    assigned = me["username"]
+    port = c.get("/api/me/portfolio").json()
+    assert [a["currency"] for a in port["accounts"]] == ["USD"]
+    assert next(a for a in port["accounts"] if a["currency"] == "USD")["cash"] == DEFAULT_INITIAL_CASH["USD"]
     # signing in again with the same sub logs into the same account (no second user)
     c.post("/api/auth/logout")
     start = c.get("/auth/google/start")
     st = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
     assert c.get("/auth/google/callback", params={"code": "the-code", "state": st}).status_code == 303
-    assert c.get("/api/auth/me").json()["username"] == "newperson2"
-    assert app.state.engine.list_users().count("newperson2") == 1
+    assert c.get("/api/auth/me").json()["username"] == assigned
+    assert app.state.engine.list_users().count(assigned) == 1

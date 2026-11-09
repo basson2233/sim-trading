@@ -26,12 +26,10 @@
   </form>
 
   <form id="registerForm" class="order-form hidden" autocomplete="on">
-    <label>用戶名<input id="rUser" name="username" autocomplete="username" required maxlength="20">
-      <small class="muted">2-20 個字，可以用中英文、數字、_ 或 -</small></label>
     <label>電郵<input id="rEmail" name="email" type="email" autocomplete="email" required maxlength="254">
-      <small class="muted">用嚟重設密碼，唔可以同其他人重複</small></label>
+      <small class="muted">用嚟重設密碼，唔可以同其他人重複。公開顯示名會自動分配（如 u482917），之後可改名。</small></label>
     <label>密碼<input id="rPass" name="new-password" type="password" autocomplete="new-password" required minlength="8">
-      <small class="muted">最少 8 個字，唔可以同用戶名一樣</small></label>
+      <small class="muted">最少 8 個字</small></label>
     <label>確認密碼<input id="rPass2" type="password" autocomplete="new-password" required minlength="8"></label>
     <button class="btn primary big">註冊並開始交易</button>
     <a class="btn ghost big google-btn hidden" href="/auth/google/start">用 Google 登入</a>
@@ -48,7 +46,7 @@ $("#registerForm").classList.toggle("hidden", !isReg);
 $("#tabLogin").classList.toggle("on", !isReg);
 $("#tabRegister").classList.toggle("on", isReg);
 document.title = (isReg ? "註冊" : "登入") + "・模擬股票交易平台";
-(isReg ? $("#rUser") : $("#lEmail")).focus();
+(isReg ? $("#rEmail") : $("#lEmail")).focus();
 
 async function post(url, body, msgEl, btn) {
   msgEl.className = "msg"; msgEl.textContent = ""; btn.disabled = true;
@@ -68,7 +66,7 @@ $("#registerForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const m = $("#registerMsg");
   if ($("#rPass").value !== $("#rPass2").value) { m.className = "msg err"; m.textContent = "❌ 兩次輸入嘅密碼唔一樣"; return; }
-  post("/api/auth/register", {username: $("#rUser").value.trim(), email: $("#rEmail").value.trim(),
+  post("/api/auth/register", {email: $("#rEmail").value.trim(),
     password: $("#rPass").value, password_confirm: $("#rPass2").value}, m, e.submitter);
 });
 fetch("/api/auth/providers").then((r) => r.json()).then((d) => {

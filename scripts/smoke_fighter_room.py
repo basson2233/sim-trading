@@ -21,9 +21,11 @@ PW = "smoke-pass-1"
 def register_or_login(client: httpx.Client, name: str) -> None:
     email = f"{name}@smoke.local"
     r = client.post(f"{BASE}/api/auth/register", json={
-        "username": name, "password": PW, "password_confirm": PW, "email": email,
+        "password": PW, "password_confirm": PW, "email": email,
     })
-    if r.status_code != 200:
+    if r.status_code == 200:
+        client.post(f"{BASE}/api/auth/change-username", json={"username": name})
+    else:
         r = client.post(f"{BASE}/api/auth/login", json={"email": email, "password": PW})
         r.raise_for_status()
 

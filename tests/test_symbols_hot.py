@@ -12,7 +12,7 @@ def _client(feed):
     app = create_app(db_path=":memory:", feed=feed, pending_interval=0)
     c = TestClient(app, follow_redirects=False)
     c.post("/api/auth/register", json={
-        "username": "alice", "password": PW, "password_confirm": PW,
+        "password": PW, "password_confirm": PW,
         "email": "alice@example.com",
     })
     return c

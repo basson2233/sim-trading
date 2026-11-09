@@ -36,7 +36,7 @@ def test_suggest_api_requires_auth_and_returns_matches(feed):
     c = TestClient(app, follow_redirects=False)
     assert c.get("/api/symbols/suggest", params={"q": "AAP"}).status_code == 401
 
-    c.post("/api/auth/register", json={"username": "alice", "password": PW, "password_confirm": PW,
+    c.post("/api/auth/register", json={"password": PW, "password_confirm": PW,
                                        "email": "alice@example.com"})
     r = c.get("/api/symbols/suggest", params={"q": "AAP", "limit": 10})
     assert r.status_code == 200

@@ -190,7 +190,8 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
 
     # ------------------------------------------------------------- models
     class RegisterIn(BaseModel):
-        username: str
+        # username optional+ignored: server assigns privacy handle u###### (same as Google)
+        username: Optional[str] = None
         password: str
         password_confirm: str
         email: str
@@ -235,7 +236,8 @@ def create_app(db_path=None, feed=None, pending_interval=None, cookie_secure=Non
     # ------------------------------------------------------------- auth API
     @app.post("/api/auth/register")
     def register(body: RegisterIn, request: Request, response: Response):
-        user = guard(auth.register, body.username, body.password, body.password_confirm, body.email,
+        # body.username ignored; assigned handle returned so FE can show it
+        user = guard(auth.register, body.password, body.password_confirm, body.email,
                      ip=client_ip(request))
         set_session_cookie(response, auth.create_session(user["id"]))
         return {"username": user["username"]}

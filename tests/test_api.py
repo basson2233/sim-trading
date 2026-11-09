@@ -18,8 +18,15 @@ def client(app):
 
 
 def register(c, name, pw=PW, email=None):
-    return c.post("/api/auth/register", json={"username": name, "password": pw, "password_confirm": pw,
-                                              "email": email or f"{name}@example.com"})
+    """Register with email+password; server assigns u###### then we rename for readable tests."""
+    r = c.post("/api/auth/register", json={
+        "password": pw, "password_confirm": pw,
+        "email": email or f"{name}@example.com",
+    })
+    if r.status_code == 200:
+        ren = c.post("/api/auth/change-username", json={"username": name})
+        assert ren.status_code == 200, ren.text
+    return r
 
 
 def test_everything_requires_auth(app):
@@ -42,21 +49,32 @@ def test_everything_requires_auth(app):
 
 
 def test_register_sets_secure_session_cookie(app):
+    import re
     c = client(app)
-    r = register(c, "alice")
-    assert r.status_code == 200 and r.json() == {"username": "alice"}
-    sc = r.headers["set-cookie"].lower()
+    # raw register (no rename): server assigns privacy handle
+    raw = c.post("/api/auth/register", json={
+        "password": PW, "password_confirm": PW, "email": "alice@example.com",
+        "username": "client-supplied-ignored",
+    })
+    assert raw.status_code == 200
+    assigned = raw.json()["username"]
+    assert re.fullmatch(r"u\d{6}", assigned) or re.fullmatch(r"u[0-9a-f]{8}", assigned)
+    assert assigned != "client-supplied-ignored"
+    sc = raw.headers["set-cookie"].lower()
     assert f"{COOKIE}=" in sc and "httponly" in sc and "samesite=lax" in sc and "max-age=604800" in sc
     me = c.get("/api/auth/me").json()
-    assert me["username"] == "alice" and me["email"] == "alice@example.com" and me["has_password"] is True
+    assert me["username"] == assigned and me["email"] == "alice@example.com" and me["has_password"] is True
     assert c.get("/").status_code == 200 and c.get("/login").status_code == 303
+    # rename still available
+    assert c.post("/api/auth/change-username", json={"username": "alice"}).status_code == 200
+    assert c.get("/api/auth/me").json()["username"] == "alice"
     bad = client(app)
-    assert register(bad, "alice").status_code == 400                       # duplicate
-    assert bad.post("/api/auth/register", json={"username": "bob", "password": "short",
+    assert register(bad, "alice").status_code == 400                       # duplicate email
+    assert bad.post("/api/auth/register", json={"password": "short",
                                                  "password_confirm": "short", "email": "bob@example.com"}).status_code == 400
-    assert bad.post("/api/auth/register", json={"username": "bob", "password": PW,
+    assert bad.post("/api/auth/register", json={"password": PW,
                                                  "password_confirm": PW + "x", "email": "bob@example.com"}).status_code == 400
-    assert bad.post("/api/auth/register", json={"username": "cara", "password": PW, "password_confirm": PW,
+    assert bad.post("/api/auth/register", json={"password": PW, "password_confirm": PW,
                                                  "email": "alice@example.com"}).status_code == 400
 
 

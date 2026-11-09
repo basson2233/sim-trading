@@ -151,7 +151,7 @@ def test_session_api(feed):
     c = TestClient(app)
     assert c.get("/api/market/session").status_code == 401
     c.post("/api/auth/register", json={
-        "username": "bob", "password": "secret-pass-1", "password_confirm": "secret-pass-1",
+        "password": "secret-pass-1", "password_confirm": "secret-pass-1",
         "email": "bob@example.com",
     })
     r = c.get("/api/market/session")

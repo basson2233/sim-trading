@@ -17,11 +17,16 @@ def client(app):
     return TestClient(app, follow_redirects=False)
 
 
-def register(c, name, pw=PW):
-    return c.post("/api/auth/register", json={
-        "username": name, "password": pw, "password_confirm": pw,
-        "email": f"{name}@example.com",
+def register(c, name, pw=PW, email=None):
+    """Register with email+password; server assigns u###### then we rename for readable tests."""
+    r = c.post("/api/auth/register", json={
+        "password": pw, "password_confirm": pw,
+        "email": email or f"{name}@example.com",
     })
+    if r.status_code == 200:
+        ren = c.post("/api/auth/change-username", json={"username": name})
+        assert ren.status_code == 200, ren.text
+    return r
 
 
 def test_place_without_reason_ok(app):

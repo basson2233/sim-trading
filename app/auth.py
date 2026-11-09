@@ -133,13 +133,16 @@ class AuthService:
             return [r["username"] for r in rows]
 
     # ------------------------------------------------------------- accounts
-    def register(self, username, password, password_confirm=None, email=None, ip="?"):
+    def register(self, password, password_confirm=None, email=None, ip="?", username=None):
+        """Email+password signup. Public username is a privacy handle (u######), same as Google.
+        Client-supplied username is ignored; users can rename later via change_username."""
         if self.ip_register.blocked(ip):
             raise RateLimited("註冊太頻密，請遲啲再試")
-        username = self.engine.validate_username(username)
         email = normalize_email(email)
         if password_confirm is not None and password != password_confirm:
             raise TradingError("兩次輸入嘅密碼唔一樣")
+        validate_password(password)  # length rules before we mint a handle
+        username = self._username_from_email(email)
         validate_password(password, username)
         user = self.engine.create_user(username, hash_password(password), email=email, email_verified=0)
         self.ip_register.hit(ip)
