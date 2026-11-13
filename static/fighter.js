@@ -218,7 +218,7 @@
   const CHARACTERS = [
     {
       id: "herta",
-      name: "大黑塔",
+      name: "黑塔女士",
       tag: "法師・預設",
       portrait: `/static/fighter/sprites/herta/portrait.png?v=${ASSET_VER}`,
     },
